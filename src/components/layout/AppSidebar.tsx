@@ -56,6 +56,12 @@ const menuItems = [
     roles: ['admin', 'estoque'] 
   },
   { 
+    title: 'Histórico Preços', 
+    icon: BarChart3, 
+    path: '/historico-precos', 
+    roles: ['admin', 'estoque', 'financeiro'] 
+  },
+  { 
     title: 'Fichas Técnicas', 
     icon: BookOpen, 
     path: '/fichas-tecnicas', 
