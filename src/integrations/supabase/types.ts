@@ -637,6 +637,66 @@ export type Database = {
         }
         Relationships: []
       }
+      reservations: {
+        Row: {
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          confirmed_at: string | null
+          confirmed_by: string | null
+          created_at: string | null
+          customer_email: string | null
+          customer_name: string
+          customer_phone: string
+          duration_minutes: number | null
+          id: string
+          notes: string | null
+          party_size: number
+          reservation_date: string
+          reservation_time: string
+          status: string
+          table_number: string
+          updated_at: string | null
+        }
+        Insert: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string | null
+          customer_email?: string | null
+          customer_name: string
+          customer_phone: string
+          duration_minutes?: number | null
+          id?: string
+          notes?: string | null
+          party_size?: number
+          reservation_date: string
+          reservation_time: string
+          status?: string
+          table_number: string
+          updated_at?: string | null
+        }
+        Update: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string | null
+          customer_email?: string | null
+          customer_name?: string
+          customer_phone?: string
+          duration_minutes?: number | null
+          id?: string
+          notes?: string | null
+          party_size?: number
+          reservation_date?: string
+          reservation_time?: string
+          status?: string
+          table_number?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       restaurant_settings: {
         Row: {
           accept_reservations: boolean | null
