@@ -32,10 +32,10 @@ type Product = {
   id: string;
   name: string;
   unit: string;
-  current_quantity: number;
-  average_price: number;
-  last_price: number;
-  min_quantity: number;
+  current_quantity: number | null;
+  average_price: number | null;
+  last_price: number | null;
+  min_quantity: number | null;
   is_active: boolean;
 };
 
@@ -128,8 +128,8 @@ export default function Estoque() {
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const lowStockProducts = products?.filter(p => p.current_quantity <= p.min_quantity) || [];
-  const totalValue = products?.reduce((sum, p) => sum + (p.current_quantity * p.average_price), 0) || 0;
+  const lowStockProducts = products?.filter(p => (p.current_quantity ?? 0) <= (p.min_quantity ?? 0)) || [];
+  const totalValue = products?.reduce((sum, p) => sum + ((p.current_quantity ?? 0) * (p.average_price ?? 0)), 0) || 0;
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -275,12 +275,12 @@ export default function Estoque() {
                       <TableRow key={product.id}>
                         <TableCell className="font-medium">{product.name}</TableCell>
                         <TableCell>
-                          {product.current_quantity.toFixed(3)} {product.unit}
+                          {(product.current_quantity ?? 0).toFixed(3)} {product.unit}
                         </TableCell>
-                        <TableCell>{formatCurrency(product.average_price)}/{product.unit}</TableCell>
-                        <TableCell>{formatCurrency(product.last_price)}/{product.unit}</TableCell>
+                        <TableCell>{formatCurrency(product.average_price ?? 0)}/{product.unit}</TableCell>
+                        <TableCell>{formatCurrency(product.last_price ?? 0)}/{product.unit}</TableCell>
                         <TableCell>
-                          {product.current_quantity <= product.min_quantity ? (
+                          {(product.current_quantity ?? 0) <= (product.min_quantity ?? 0) ? (
                             <Badge variant="destructive">Baixo</Badge>
                           ) : (
                             <Badge className="bg-success">OK</Badge>
