@@ -83,6 +83,7 @@ interface OrderData {
   preparing_at: string | null;
   ready_at: string | null;
   delivered_at: string | null;
+  paid_at: string | null;
   order_items?: {
     id: string;
     quantity: number;
@@ -385,10 +386,13 @@ export default function Cliente() {
     (o) => !["delivered", "cancelled"].includes(o.status)
   );
 
-  // Bill total (all orders not cancelled)
-  const billTotal = customerOrders
-    .filter((o) => o.status !== "cancelled")
-    .reduce((sum, o) => sum + (o.total || 0), 0);
+  // Open orders (not cancelled and not paid)
+  const openOrders = customerOrders.filter(
+    (o) => o.status !== "cancelled" && !o.paid_at
+  );
+
+  // Bill total (only open orders)
+  const billTotal = openOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
   const getPaymentMethodLabel = (method: string) => {
     const labels: Record<string, string> = {
@@ -882,15 +886,13 @@ export default function Cliente() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {customerOrders.filter((o) => o.status !== "cancelled").length === 0 ? (
+                {openOrders.length === 0 ? (
                   <p className="text-center text-muted-foreground py-4">
-                    Nenhum pedido para pagar
+                    Nenhum pedido em aberto
                   </p>
                 ) : (
                   <>
-                    {customerOrders
-                      .filter((o) => o.status !== "cancelled")
-                      .map((order) => (
+                    {openOrders.map((order) => (
                         <div key={order.id} className="border-b pb-3 last:border-0 last:pb-0">
                           <div className="flex justify-between items-center mb-2">
                             <span className="font-semibold">Pedido #{order.order_number}</span>
