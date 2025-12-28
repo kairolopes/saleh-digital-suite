@@ -24,7 +24,8 @@ import {
   User,
   ArrowRight,
   ArrowLeft,
-  MessageSquare
+  MessageSquare,
+  HandPlatter
 } from "lucide-react";
 import {
   Dialog,
@@ -84,6 +85,7 @@ export default function Cliente() {
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [itemQuantity, setItemQuantity] = useState(1);
   const [itemNotes, setItemNotes] = useState("");
+  const [callingWaiter, setCallingWaiter] = useState(false);
 
   // Check if user already registered (localStorage)
   useEffect(() => {
@@ -177,6 +179,38 @@ export default function Cliente() {
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao criar pedido");
+    },
+  });
+
+  // Call waiter mutation
+  const callWaiter = useMutation({
+    mutationFn: async () => {
+      if (!customerPhone || !tableNumber) throw new Error("Dados incompletos");
+      
+      const { error } = await supabase
+        .from("notifications")
+        .insert({
+          type: "call_waiter",
+          title: `Chamado da Mesa ${tableNumber}`,
+          message: `${customerName || "Cliente"} está chamando o garçom`,
+          priority: "high",
+          target_roles: ["garcom", "admin"],
+          data: {
+            table_number: tableNumber,
+            customer_name: customerName,
+            customer_phone: customerPhone,
+          },
+        });
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setCallingWaiter(true);
+      toast.success("Garçom chamado! Aguarde um momento.");
+      setTimeout(() => setCallingWaiter(false), 30000); // Reset after 30s
+    },
+    onError: () => {
+      toast.error("Erro ao chamar garçom. Tente novamente.");
     },
   });
 
@@ -549,17 +583,30 @@ export default function Cliente() {
                 </p>
               </div>
             </div>
-            {cartCount > 0 && (
+            <div className="flex items-center gap-2">
+              {/* Call Waiter Button */}
               <Button
-                variant="default"
+                variant={callingWaiter ? "secondary" : "outline"}
                 size="sm"
-                className="relative"
-                onClick={() => setStep("cart")}
+                onClick={() => callWaiter.mutate()}
+                disabled={callingWaiter || callWaiter.isPending}
+                className={callingWaiter ? "animate-pulse" : ""}
               >
-                <ShoppingCart className="w-5 h-5 mr-2" />
-                {cartCount}
+                <HandPlatter className="w-4 h-4 mr-1" />
+                {callingWaiter ? "Chamando..." : "Garçom"}
               </Button>
-            )}
+              {cartCount > 0 && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="relative"
+                  onClick={() => setStep("cart")}
+                >
+                  <ShoppingCart className="w-5 h-5 mr-2" />
+                  {cartCount}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </header>
