@@ -29,6 +29,7 @@ import {
   LogOut,
   Truck,
   QrCode,
+  CalendarDays,
 } from 'lucide-react';
 
 const menuItems = [
@@ -109,6 +110,12 @@ const menuItems = [
     icon: QrCode, 
     path: '/qrcodes', 
     roles: ['admin'] 
+  },
+  { 
+    title: 'Reservas', 
+    icon: CalendarDays, 
+    path: '/reservas', 
+    roles: ['admin', 'garcom'] 
   },
   { 
     title: 'Configurações', 
