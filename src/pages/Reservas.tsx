@@ -140,6 +140,22 @@ export default function Reservas() {
     },
   });
 
+  // Send webhook notification
+  const sendWebhook = async (reservationId: string, action: 'confirmed' | 'cancelled' | 'created') => {
+    try {
+      const { error } = await supabase.functions.invoke('send-reservation-webhook', {
+        body: { reservation_id: reservationId, action },
+      });
+      if (error) {
+        console.error('Webhook error:', error);
+      } else {
+        console.log('Webhook sent successfully');
+      }
+    } catch (err) {
+      console.error('Failed to send webhook:', err);
+    }
+  };
+
   // Update reservation status
   const updateStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
@@ -154,10 +170,16 @@ export default function Reservas() {
         .update(updates)
         .eq('id', id);
       if (error) throw error;
+      return { id, status };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['reservations'] });
       toast.success('Status atualizado!');
+      
+      // Send webhook for confirmed or cancelled reservations
+      if (data.status === 'confirmed' || data.status === 'cancelled') {
+        sendWebhook(data.id, data.status as 'confirmed' | 'cancelled');
+      }
     },
     onError: () => {
       toast.error('Erro ao atualizar status');

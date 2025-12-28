@@ -39,3 +39,6 @@ verify_jwt = false
 
 [functions.webhook-table-status]
 verify_jwt = false
+
+[functions.send-reservation-webhook]
+verify_jwt = true
