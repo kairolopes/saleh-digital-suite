@@ -16,7 +16,8 @@ import {
   Clock, 
   Palette,
   Save,
-  Loader2
+  Loader2,
+  Webhook
 } from 'lucide-react';
 
 interface OperatingHours {
@@ -42,6 +43,7 @@ interface RestaurantSettings {
   accept_reservations: boolean;
   max_tables: number;
   default_order_type: string;
+  reservation_webhook_url: string | null;
 }
 
 const dayNames: Record<string, string> = {
@@ -407,6 +409,23 @@ export default function Configuracoes() {
                       min={1}
                       max={100}
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reservation_webhook_url" className="flex items-center gap-2">
+                      <Webhook className="h-4 w-4" />
+                      Webhook de Reservas
+                    </Label>
+                    <Input
+                      id="reservation_webhook_url"
+                      value={getValue('reservation_webhook_url') || ''}
+                      onChange={(e) => handleInputChange('reservation_webhook_url', e.target.value)}
+                      placeholder="https://sua-plataforma.com/webhook"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      URL para receber notificações quando reservas forem confirmadas ou canceladas.
+                      Os campos enviados são: customer_name, customer_phone, customer_email, table_number, 
+                      party_size, reservation_date, reservation_time, status, notes, restaurant_name, action.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
