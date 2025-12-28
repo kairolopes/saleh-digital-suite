@@ -28,6 +28,7 @@ import {
   Settings,
   LogOut,
   Truck,
+  QrCode,
 } from 'lucide-react';
 
 const menuItems = [
@@ -101,6 +102,12 @@ const menuItems = [
     title: 'Usuários', 
     icon: Users, 
     path: '/usuarios', 
+    roles: ['admin'] 
+  },
+  { 
+    title: 'QR Codes Mesas', 
+    icon: QrCode, 
+    path: '/qrcodes', 
     roles: ['admin'] 
   },
   { 
