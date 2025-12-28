@@ -651,6 +651,7 @@ export type Database = {
           id: string
           notes: string | null
           party_size: number
+          reminder_sent_at: string | null
           reservation_date: string
           reservation_time: string
           status: string
@@ -670,6 +671,7 @@ export type Database = {
           id?: string
           notes?: string | null
           party_size?: number
+          reminder_sent_at?: string | null
           reservation_date: string
           reservation_time: string
           status?: string
@@ -689,6 +691,7 @@ export type Database = {
           id?: string
           notes?: string | null
           party_size?: number
+          reminder_sent_at?: string | null
           reservation_date?: string
           reservation_time?: string
           status?: string

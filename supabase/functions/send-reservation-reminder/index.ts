@@ -136,6 +136,17 @@ Deno.serve(async (req) => {
 
         if (response.ok) {
           console.log(`Reminder sent successfully for reservation ${reservation.id}`);
+          
+          // Mark reservation as reminded
+          const { error: updateError } = await supabase
+            .from("reservations")
+            .update({ reminder_sent_at: new Date().toISOString() })
+            .eq("id", reservation.id);
+          
+          if (updateError) {
+            console.error(`Failed to update reminder_sent_at for reservation ${reservation.id}:`, updateError);
+          }
+          
           successCount++;
         } else {
           console.error(`Failed to send reminder for reservation ${reservation.id}: ${response.status}`);
