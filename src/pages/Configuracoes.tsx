@@ -44,6 +44,7 @@ interface RestaurantSettings {
   max_tables: number;
   default_order_type: string;
   reservation_webhook_url: string | null;
+  reminder_hour: number | null;
 }
 
 const dayNames: Record<string, string> = {
@@ -425,6 +426,28 @@ export default function Configuracoes() {
                       URL para receber notificações quando reservas forem confirmadas ou canceladas.
                       Os campos enviados são: customer_name, customer_phone, customer_email, table_number, 
                       party_size, reservation_date, reservation_time, status, notes, restaurant_name, action.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reminder_hour" className="flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Horário do Lembrete Automático
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="reminder_hour"
+                        type="number"
+                        value={getValue('reminder_hour') ?? 10}
+                        onChange={(e) => handleInputChange('reminder_hour', parseInt(e.target.value) || 10)}
+                        min={0}
+                        max={23}
+                        className="w-24"
+                      />
+                      <span className="text-sm text-muted-foreground">horas (UTC)</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Horário para enviar lembretes automáticos de reservas confirmadas para o dia seguinte.
+                      O lembrete é enviado via webhook configurado acima.
                     </p>
                   </div>
                 </CardContent>

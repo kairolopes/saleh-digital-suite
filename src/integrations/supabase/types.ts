@@ -714,6 +714,7 @@ export type Database = {
           operating_hours: Json | null
           phone: string | null
           primary_color: string | null
+          reminder_hour: number | null
           reservation_webhook_url: string | null
           state: string | null
           updated_at: string | null
@@ -735,6 +736,7 @@ export type Database = {
           operating_hours?: Json | null
           phone?: string | null
           primary_color?: string | null
+          reminder_hour?: number | null
           reservation_webhook_url?: string | null
           state?: string | null
           updated_at?: string | null
@@ -756,6 +758,7 @@ export type Database = {
           operating_hours?: Json | null
           phone?: string | null
           primary_color?: string | null
+          reminder_hour?: number | null
           reservation_webhook_url?: string | null
           state?: string | null
           updated_at?: string | null
