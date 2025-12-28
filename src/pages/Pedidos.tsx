@@ -79,7 +79,8 @@ const orderStatuses = {
   confirmed: { label: "Confirmado", color: "bg-blue-500" },
   preparing: { label: "Preparando", color: "bg-orange-500" },
   ready: { label: "Pronto", color: "bg-green-500" },
-  delivered: { label: "Entregue", color: "bg-gray-500" },
+  delivered: { label: "Entregue", color: "bg-purple-500" },
+  paid: { label: "Pago", color: "bg-gray-500" },
   cancelled: { label: "Cancelado", color: "bg-red-500" },
 };
 
@@ -186,18 +187,23 @@ export default function Pedidos() {
   const updateStatusMutation = useMutation({
     mutationFn: async ({ orderId, status, paymentMethod }: { orderId: string; status: string; paymentMethod?: string }) => {
       const updateData: Record<string, any> = { status };
+      
+      // When delivering: just update status (stock is deducted by trigger)
       if (status === "delivered") {
         updateData.delivered_at = new Date().toISOString();
-        if (paymentMethod) {
-          updateData.payment_method = paymentMethod;
-          updateData.paid_at = new Date().toISOString();
-        }
       }
+      
+      // When closing/paying: update payment info and create financial entry
+      if (status === "paid" && paymentMethod) {
+        updateData.payment_method = paymentMethod;
+        updateData.paid_at = new Date().toISOString();
+      }
+      
       const { error } = await supabase.from("orders").update(updateData).eq("id", orderId);
       if (error) throw error;
       
-      // Create financial entry if delivered with payment
-      if (status === "delivered" && paymentMethod) {
+      // Create financial entry only when paid
+      if (status === "paid" && paymentMethod) {
         const order = orders?.find(o => o.id === orderId);
         if (order) {
           await supabase.from("financial_entries").insert({
@@ -247,8 +253,8 @@ export default function Pedidos() {
   };
 
   const cartTotal = cart.reduce((sum, item) => sum + item.menuItem.sell_price * item.quantity, 0);
-  const activeOrders = orders?.filter((o) => !["delivered", "cancelled"].includes(o.status));
-  const completedOrders = orders?.filter((o) => ["delivered", "cancelled"].includes(o.status));
+  const activeOrders = orders?.filter((o) => !["paid", "cancelled"].includes(o.status));
+  const completedOrders = orders?.filter((o) => ["paid", "cancelled"].includes(o.status));
 
   const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
   const formatTime = (dateStr: string) => new Date(dateStr).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -259,7 +265,16 @@ export default function Pedidos() {
     return acc;
   }, {} as Record<string, MenuItem[]>);
 
+  // Deliver order: deducts stock (via trigger), but doesn't close financially
   const handleDeliverOrder = (order: Order) => {
+    updateStatusMutation.mutate({
+      orderId: order.id,
+      status: "delivered",
+    });
+  };
+
+  // Open payment dialog to close the order financially
+  const handleCloseOrder = (order: Order) => {
     setPaymentDialogOrder(order);
   };
 
@@ -270,7 +285,7 @@ export default function Pedidos() {
     }
     updateStatusMutation.mutate({
       orderId: paymentDialogOrder.id,
-      status: "delivered",
+      status: "paid",
       paymentMethod: selectedPaymentMethod,
     });
   };
@@ -431,7 +446,8 @@ export default function Pedidos() {
                 <div className="grid grid-cols-2 gap-2 pt-4 border-t">
                   {selectedOrder.status === "pending" && (<><Button variant="outline" onClick={() => updateStatusMutation.mutate({ orderId: selectedOrder.id, status: "cancelled" })} className="text-destructive"><XCircle className="h-4 w-4 mr-2" />Cancelar</Button><Button onClick={() => updateStatusMutation.mutate({ orderId: selectedOrder.id, status: "confirmed" })}><CheckCircle className="h-4 w-4 mr-2" />Confirmar</Button></>)}
                   {selectedOrder.status === "confirmed" && <Button className="col-span-2" onClick={() => updateStatusMutation.mutate({ orderId: selectedOrder.id, status: "preparing" })}>Enviar para Cozinha</Button>}
-                  {selectedOrder.status === "ready" && <Button className="col-span-2 bg-green-600 hover:bg-green-700" onClick={() => handleDeliverOrder(selectedOrder)}><CheckCircle className="h-4 w-4 mr-2" />Fechar Comanda</Button>}
+                  {selectedOrder.status === "ready" && <Button className="col-span-2 bg-green-600 hover:bg-green-700" onClick={() => handleDeliverOrder(selectedOrder)}><CheckCircle className="h-4 w-4 mr-2" />Entregar Pedido</Button>}
+                  {selectedOrder.status === "delivered" && <Button className="col-span-2 bg-purple-600 hover:bg-purple-700" onClick={() => handleCloseOrder(selectedOrder)}><CreditCard className="h-4 w-4 mr-2" />Fechar Comanda</Button>}
                 </div>
               </div>
             )}

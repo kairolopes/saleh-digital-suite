@@ -75,7 +75,8 @@ const statusConfig = {
   confirmed: { label: "Confirmado", color: "bg-blue-500", textColor: "text-blue-600" },
   preparing: { label: "Preparando", color: "bg-orange-500", textColor: "text-orange-600" },
   ready: { label: "PRONTO!", color: "bg-green-500", textColor: "text-green-600" },
-  delivered: { label: "Entregue", color: "bg-gray-500", textColor: "text-gray-600" },
+  delivered: { label: "Entregue", color: "bg-purple-500", textColor: "text-purple-600" },
+  paid: { label: "Pago", color: "bg-gray-500", textColor: "text-gray-600" },
   cancelled: { label: "Cancelado", color: "bg-red-500", textColor: "text-red-600" },
 };
 
@@ -108,7 +109,7 @@ export default function Garcom() {
       const { data, error } = await supabase
         .from("orders")
         .select(`*, order_items (*, menu_items (*, recipes (name)))`)
-        .in("status", ["pending", "confirmed", "preparing", "ready"])
+        .in("status", ["pending", "confirmed", "preparing", "ready", "delivered"])
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data as Order[];
@@ -200,14 +201,35 @@ export default function Garcom() {
     },
   });
 
-  // Deliver order mutation
+  // Deliver order mutation (just changes status, stock deducted by trigger)
   const deliverMutation = useMutation({
-    mutationFn: async ({ orderId, paymentMethod }: { orderId: string; paymentMethod: string }) => {
+    mutationFn: async (orderId: string) => {
       const { error } = await supabase
         .from("orders")
         .update({
           status: "delivered",
           delivered_at: new Date().toISOString(),
+        })
+        .eq("id", orderId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["waiter-orders"] });
+      toast.success("Pedido entregue! Estoque atualizado.");
+      setSelectedOrder(null);
+    },
+    onError: () => {
+      toast.error("Erro ao entregar pedido");
+    },
+  });
+
+  // Close order mutation (payment and financial entry)
+  const closeOrderMutation = useMutation({
+    mutationFn: async ({ orderId, paymentMethod }: { orderId: string; paymentMethod: string }) => {
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: "paid",
           payment_method: paymentMethod,
           paid_at: new Date().toISOString(),
         })
@@ -229,13 +251,13 @@ export default function Garcom() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["waiter-orders"] });
-      toast.success("Pedido entregue e pago!");
+      toast.success("Comanda fechada!");
       setPaymentOrder(null);
       setSelectedPayment("");
       setSelectedOrder(null);
     },
     onError: () => {
-      toast.error("Erro ao finalizar pedido");
+      toast.error("Erro ao fechar comanda");
     },
   });
 
@@ -246,6 +268,7 @@ export default function Garcom() {
     new Date(dateStr).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
   const readyOrders = orders?.filter((o) => o.status === "ready") || [];
+  const deliveredOrders = orders?.filter((o) => o.status === "delivered") || [];
   const preparingOrders = orders?.filter((o) => o.status === "preparing") || [];
   const pendingOrders = orders?.filter((o) => ["pending", "confirmed"].includes(o.status)) || [];
 
@@ -254,7 +277,7 @@ export default function Garcom() {
       toast.error("Selecione a forma de pagamento");
       return;
     }
-    deliverMutation.mutate({ orderId: paymentOrder.id, paymentMethod: selectedPayment });
+    closeOrderMutation.mutate({ orderId: paymentOrder.id, paymentMethod: selectedPayment });
   };
 
   return (
@@ -286,13 +309,20 @@ export default function Garcom() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-3 gap-4 mt-4">
+          <div className="grid grid-cols-4 gap-4 mt-4">
             <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4 text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
                 <BellRing className="h-5 w-5 text-green-600" />
                 <span className="text-3xl font-bold text-green-600">{readyOrders.length}</span>
               </div>
-              <p className="text-sm font-medium text-green-700">Prontos para Servir</p>
+              <p className="text-sm font-medium text-green-700">Prontos</p>
+            </div>
+            <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4 text-center">
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <CreditCard className="h-5 w-5 text-purple-600" />
+                <span className="text-3xl font-bold text-purple-600">{deliveredOrders.length}</span>
+              </div>
+              <p className="text-sm font-medium text-purple-700">Aguard. Pagamento</p>
             </div>
             <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-4 text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
@@ -415,11 +445,72 @@ export default function Garcom() {
                       className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700"
                       onClick={(e) => {
                         e.stopPropagation();
+                        deliverMutation.mutate(order.id);
+                      }}
+                      disabled={deliverMutation.isPending}
+                    >
+                      <CheckCircle className="h-6 w-6 mr-2" />
+                      Entregar Pedido
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Delivered Orders - Awaiting Payment */}
+        {deliveredOrders.length > 0 && (
+          <div className="mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <CreditCard className="h-6 w-6 text-purple-600" />
+              <h2 className="text-xl font-bold text-purple-700">Aguardando Pagamento</h2>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {deliveredOrders.map((order) => (
+                <Card
+                  key={order.id}
+                  className="cursor-pointer border-2 border-purple-400 bg-purple-50 dark:bg-purple-950/30 hover:shadow-lg transition-all"
+                  onClick={() => setSelectedOrder(order)}
+                >
+                  <CardContent className="p-6">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-3xl font-black text-purple-700">
+                            #{order.order_number}
+                          </span>
+                        </div>
+                        {order.table_number && (
+                          <div className="flex items-center gap-1 mt-1 text-purple-700">
+                            <MapPin className="h-4 w-4" />
+                            <span className="font-bold text-lg">Mesa {order.table_number}</span>
+                          </div>
+                        )}
+                      </div>
+                      <Badge className="bg-purple-600 text-white text-lg px-4 py-1">Entregue</Badge>
+                    </div>
+                    <div className="flex items-center justify-between mb-3">
+                      {order.customer_name && (
+                        <div className="flex items-center gap-2 text-purple-800">
+                          <User className="h-5 w-5" />
+                          <span className="font-semibold text-lg">{order.customer_name}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-center mb-4">
+                      <p className="text-muted-foreground text-sm">Total</p>
+                      <p className="text-3xl font-bold text-purple-700">{formatCurrency(order.total || 0)}</p>
+                    </div>
+                    <Button
+                      className="w-full h-14 text-lg font-bold bg-purple-600 hover:bg-purple-700"
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setPaymentOrder(order);
                       }}
                     >
-                      <CheckCircle className="h-6 w-6 mr-2" />
-                      Entregar e Fechar
+                      <CreditCard className="h-6 w-6 mr-2" />
+                      Fechar Comanda
                     </Button>
                   </CardContent>
                 </Card>
@@ -603,9 +694,12 @@ export default function Garcom() {
               <Button
                 className="w-full h-16 text-xl font-bold bg-green-600 hover:bg-green-700"
                 onClick={() => {
-                  setPaymentOrder(readyAlert);
+                  if (readyAlert) {
+                    deliverMutation.mutate(readyAlert.id);
+                  }
                   setReadyAlert(null);
                 }}
+                disabled={deliverMutation.isPending}
               >
                 <CheckCircle className="h-8 w-8 mr-3" />
                 Buscar e Entregar
@@ -693,12 +787,24 @@ export default function Garcom() {
                   <Button
                     className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700"
                     onClick={() => {
+                      deliverMutation.mutate(selectedOrder.id);
+                    }}
+                    disabled={deliverMutation.isPending}
+                  >
+                    <CheckCircle className="h-6 w-6 mr-2" />
+                    Entregar Pedido
+                  </Button>
+                )}
+                {selectedOrder.status === "delivered" && (
+                  <Button
+                    className="w-full h-14 text-lg font-bold bg-purple-600 hover:bg-purple-700"
+                    onClick={() => {
                       setPaymentOrder(selectedOrder);
                       setSelectedOrder(null);
                     }}
                   >
-                    <CheckCircle className="h-6 w-6 mr-2" />
-                    Entregar e Fechar Comanda
+                    <CreditCard className="h-6 w-6 mr-2" />
+                    Fechar Comanda
                   </Button>
                 )}
               </div>
@@ -745,7 +851,7 @@ export default function Garcom() {
               <Button
                 className="w-full h-14 text-lg font-bold"
                 onClick={handleConfirmPayment}
-                disabled={!selectedPayment || deliverMutation.isPending}
+                disabled={!selectedPayment || closeOrderMutation.isPending}
               >
                 <CheckCircle className="h-6 w-6 mr-2" />
                 Confirmar Pagamento
