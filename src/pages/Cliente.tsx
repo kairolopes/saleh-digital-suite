@@ -121,7 +121,7 @@ export default function Cliente() {
           category,
           is_available,
           display_order,
-          recipes (
+          recipes:recipe_id (
             id,
             name,
             description,
