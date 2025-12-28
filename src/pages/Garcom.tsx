@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useElapsedTime } from "@/hooks/useElapsedTime";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +88,9 @@ export default function Garcom() {
   const [selectedPayment, setSelectedPayment] = useState("");
   const [readyAlert, setReadyAlert] = useState<Order | null>(null);
   const [waiterCalls, setWaiterCalls] = useState<any[]>([]);
+
+  // Elapsed time hook for live counters
+  const { getElapsedTime, getUrgencyColor } = useElapsedTime(30000);
 
   // Audio for notifications
   const playSound = useCallback(() => {
@@ -388,12 +392,18 @@ export default function Garcom() {
                       </div>
                       <Badge className="bg-green-600 text-white text-lg px-4 py-1">PRONTO!</Badge>
                     </div>
-                    {order.customer_name && (
-                      <div className="flex items-center gap-2 text-green-800 mb-3">
-                        <User className="h-5 w-5" />
-                        <span className="font-semibold text-lg">{order.customer_name}</span>
+                    <div className="flex items-center justify-between mb-3">
+                      {order.customer_name && (
+                        <div className="flex items-center gap-2 text-green-800">
+                          <User className="h-5 w-5" />
+                          <span className="font-semibold text-lg">{order.customer_name}</span>
+                        </div>
+                      )}
+                      <div className={`flex items-center gap-1 px-2 py-1 rounded-lg font-medium ${getUrgencyColor(order.created_at)}`}>
+                        <Clock className="h-4 w-4" />
+                        <span className="text-sm">{getElapsedTime(order.created_at)}</span>
                       </div>
-                    )}
+                    </div>
                     <div className="space-y-1 mb-4">
                       {order.order_items?.map((item) => (
                         <p key={item.id} className="text-green-800 font-medium">
@@ -464,10 +474,10 @@ export default function Garcom() {
                       )}
                     </div>
                     <div className="flex justify-between items-center mt-3 pt-3 border-t border-orange-200">
-                      <span className="text-sm text-muted-foreground flex items-center gap-1">
+                      <div className={`flex items-center gap-1 px-2 py-1 rounded-lg font-medium ${getUrgencyColor(order.created_at)}`}>
                         <Clock className="h-4 w-4" />
-                        {formatTime(order.created_at)}
-                      </span>
+                        <span className="text-sm">{getElapsedTime(order.created_at)}</span>
+                      </div>
                       <span className="font-bold text-orange-700">{formatCurrency(order.total || 0)}</span>
                     </div>
                   </CardContent>
@@ -525,10 +535,10 @@ export default function Garcom() {
                       )}
                     </div>
                     <div className="flex justify-between items-center mt-3 pt-3 border-t">
-                      <span className="text-sm text-muted-foreground flex items-center gap-1">
+                      <div className={`flex items-center gap-1 px-2 py-1 rounded-lg font-medium ${getUrgencyColor(order.created_at)}`}>
                         <Clock className="h-4 w-4" />
-                        {formatTime(order.created_at)}
-                      </span>
+                        <span className="text-sm">{getElapsedTime(order.created_at)}</span>
+                      </div>
                       <span className="font-bold text-primary">{formatCurrency(order.total || 0)}</span>
                     </div>
                   </CardContent>
