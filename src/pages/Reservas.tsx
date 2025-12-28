@@ -16,6 +16,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -483,10 +489,19 @@ export default function Reservas() {
                                       {statusConfig[reservation.status as keyof typeof statusConfig]?.label}
                                     </Badge>
                                     {reservation.reminder_sent_at && (
-                                      <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50">
-                                        <Bell className="h-3 w-3 mr-1" />
-                                        Lembrado
-                                      </Badge>
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50 cursor-help">
+                                              <Bell className="h-3 w-3 mr-1" />
+                                              Lembrado
+                                            </Badge>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p>Lembrete enviado em {format(parseISO(reservation.reminder_sent_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
                                     )}
                                   </div>
                                 </TableCell>
