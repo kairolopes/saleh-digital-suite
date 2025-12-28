@@ -250,6 +250,30 @@ export default function Relatorios() {
     },
   });
 
+  // Stock Adjustments Report
+  const { data: stockAdjustments, isLoading: loadingAdjustments } = useQuery({
+    queryKey: ["stock-adjustments", dateRange],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("stock_movements")
+        .select(`
+          id,
+          movement_type,
+          quantity,
+          notes,
+          created_at,
+          products (name, unit)
+        `)
+        .in("movement_type", ["ajuste_entrada", "ajuste_saida"])
+        .gte("created_at", dateRange.start)
+        .lte("created_at", dateRange.end + "T23:59:59")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   // Financial Report
   const { data: financialReport, isLoading: loadingFinancial } = useQuery({
     queryKey: ["financial-report", dateRange],
@@ -729,6 +753,68 @@ export default function Relatorios() {
                               (product.current_quantity || 0) * (product.average_price || 0)
                             )}
                           </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Stock Adjustments */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Ajustes Manuais de Estoque</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingAdjustments ? (
+                  <p className="text-center py-4">Carregando...</p>
+                ) : stockAdjustments?.length === 0 ? (
+                  <p className="text-center py-8 text-muted-foreground">
+                    Nenhum ajuste manual no período selecionado.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Produto</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead className="text-right">Diferença</TableHead>
+                        <TableHead>Motivo</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {stockAdjustments?.map((adjustment: any) => (
+                        <TableRow key={adjustment.id}>
+                          <TableCell>
+                            {format(new Date(adjustment.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {adjustment.products?.name || "-"}
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={`px-2 py-1 rounded text-xs font-medium ${
+                                adjustment.movement_type === "ajuste_entrada"
+                                  ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                                  : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                              }`}
+                            >
+                              {adjustment.movement_type === "ajuste_entrada" ? "Entrada" : "Saída"}
+                            </span>
+                          </TableCell>
+                          <TableCell
+                            className={`text-right font-medium ${
+                              adjustment.movement_type === "ajuste_entrada"
+                                ? "text-green-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {adjustment.movement_type === "ajuste_entrada" ? "+" : "-"}
+                            {adjustment.quantity?.toFixed(3)} {adjustment.products?.unit}
+                          </TableCell>
+                          <TableCell>{adjustment.notes || "-"}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
