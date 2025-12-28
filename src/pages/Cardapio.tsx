@@ -18,11 +18,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Pencil, Trash2, UtensilsCrossed, Clock } from "lucide-react";
+import { Plus, Search, UtensilsCrossed } from "lucide-react";
+import { SortableCategorySection } from "@/components/cardapio/SortableCategorySection";
 
 interface Recipe {
   id: string;
@@ -133,7 +132,7 @@ export default function Cardapio() {
 
   // Update menu item
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<typeof formData> }) => {
+    mutationFn: async ({ id, data }: { id: string; data: Partial<MenuItem> }) => {
       const { error } = await supabase
         .from("menu_items")
         .update(data)
@@ -147,6 +146,25 @@ export default function Cardapio() {
     },
     onError: () => {
       toast({ title: "Erro ao atualizar item", variant: "destructive" });
+    },
+  });
+
+  // Reorder mutation
+  const reorderMutation = useMutation({
+    mutationFn: async (updates: { id: string; display_order: number }[]) => {
+      const promises = updates.map(({ id, display_order }) =>
+        supabase.from("menu_items").update({ display_order }).eq("id", id)
+      );
+      const results = await Promise.all(promises);
+      const error = results.find((r) => r.error)?.error;
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["menu-items-full"] });
+      toast({ title: "Ordem atualizada!" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao reordenar", variant: "destructive" });
     },
   });
 
@@ -171,6 +189,26 @@ export default function Cardapio() {
       id: item.id,
       data: { is_available: !item.is_available },
     });
+  };
+
+  // Handle reorder within category
+  const handleReorder = (category: string, activeId: string, overId: string) => {
+    const categoryItems = menuItems?.filter((item) => item.category === category) || [];
+    const oldIndex = categoryItems.findIndex((item) => item.id === activeId);
+    const newIndex = categoryItems.findIndex((item) => item.id === overId);
+
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reorderedItems = [...categoryItems];
+    const [movedItem] = reorderedItems.splice(oldIndex, 1);
+    reorderedItems.splice(newIndex, 0, movedItem);
+
+    const updates = reorderedItems.map((item, index) => ({
+      id: item.id,
+      display_order: index,
+    }));
+
+    reorderMutation.mutate(updates);
   };
 
   const resetForm = () => {
@@ -248,7 +286,7 @@ export default function Cardapio() {
           <div>
             <h1 className="text-3xl font-bold text-foreground">Cardápio</h1>
             <p className="text-muted-foreground">
-              Gerencie os itens disponíveis para venda
+              Gerencie os itens disponíveis para venda. Arraste para reordenar.
             </p>
           </div>
           <Button onClick={() => setIsDialogOpen(true)}>
@@ -300,98 +338,16 @@ export default function Cardapio() {
         ) : (
           <div className="space-y-8">
             {Object.entries(groupedItems || {}).map(([category, items]) => (
-              <div key={category}>
-                <h2 className="text-xl font-semibold text-foreground mb-4 border-b pb-2">
-                  {category}
-                </h2>
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {items.map((item) => (
-                    <Card
-                      key={item.id}
-                      className={`bg-card border-border transition-opacity overflow-hidden ${
-                        !item.is_available ? "opacity-60" : ""
-                      }`}
-                    >
-                      {/* Recipe Image */}
-                      {item.recipes?.image_url && (
-                        <div className="relative h-40 overflow-hidden">
-                          <img
-                            src={item.recipes.image_url}
-                            alt={item.recipes.name}
-                            className="w-full h-full object-cover"
-                          />
-                          {!item.is_available && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                              <Badge variant="secondary" className="text-lg">Indisponível</Badge>
-                            </div>
-                          )}
-                          {item.recipes?.preparation_time && (
-                            <div className="absolute bottom-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-sm flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {item.recipes.preparation_time} min
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      <CardContent className="p-4">
-                        <div className="flex justify-between items-start gap-2">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-foreground truncate">
-                              {item.recipes?.name}
-                            </h3>
-                            {item.recipes?.description && (
-                              <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
-                                {item.recipes.description}
-                              </p>
-                            )}
-                            <div className="flex items-center gap-2 mt-2">
-                              <span className="text-lg font-bold text-primary">
-                                {formatCurrency(item.sell_price)}
-                              </span>
-                              {!item.is_available && !item.recipes?.image_url && (
-                                <Badge variant="secondary">Indisponível</Badge>
-                              )}
-                            </div>
-                            {item.recipes?.preparation_time && !item.recipes?.image_url && (
-                              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {item.recipes.preparation_time} min
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleEdit(item)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive"
-                              onClick={() => deleteMutation.mutate(item.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
-                          <span className="text-sm text-muted-foreground">
-                            Disponível
-                          </span>
-                          <Switch
-                            checked={item.is_available}
-                            onCheckedChange={() => toggleAvailability(item)}
-                          />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </div>
+              <SortableCategorySection
+                key={category}
+                category={category}
+                items={items}
+                onReorder={handleReorder}
+                onEdit={handleEdit}
+                onDelete={(id) => deleteMutation.mutate(id)}
+                onToggleAvailability={toggleAvailability}
+                formatCurrency={formatCurrency}
+              />
             ))}
           </div>
         )}
