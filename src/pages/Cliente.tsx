@@ -386,12 +386,12 @@ export default function Cliente() {
     (o) => !["delivered", "cancelled"].includes(o.status)
   );
 
-  // Open orders (not cancelled and not paid)
+  // Open orders for billing (delivered and not paid)
   const openOrders = customerOrders.filter(
-    (o) => o.status !== "cancelled" && !o.paid_at
+    (o) => o.status === "delivered" && !o.paid_at
   );
 
-  // Bill total (only open orders)
+  // Bill total (only delivered and unpaid orders)
   const billTotal = openOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
   const getPaymentMethodLabel = (method: string) => {

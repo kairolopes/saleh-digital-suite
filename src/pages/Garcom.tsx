@@ -40,6 +40,8 @@ import {
   Minus,
   ShoppingCart,
   UtensilsCrossed,
+  XCircle,
+  AlertTriangle,
   Trash2,
   Split,
 } from "lucide-react";
@@ -130,6 +132,10 @@ export default function Garcom() {
   const [orderType, setOrderType] = useState<"local" | "delivery" | "takeout">("local");
   const [tableNumber, setTableNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
+  
+  // Cancel order state
+  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
 
   // Elapsed time hook for live counters
@@ -372,6 +378,34 @@ export default function Garcom() {
     },
     onError: () => {
       toast.error("Erro ao criar pedido");
+    },
+  });
+
+  // Cancel order mutation
+  const cancelOrderMutation = useMutation({
+    mutationFn: async ({ orderId, reason }: { orderId: string; reason: string }) => {
+      if (!reason.trim()) throw new Error("Motivo é obrigatório");
+      
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: "cancelled",
+          rejection_reason: reason,
+          cancelled_by: user?.id,
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq("id", orderId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["waiter-orders"] });
+      toast.success("Pedido cancelado!");
+      setCancelOrderId(null);
+      setCancelReason("");
+      setSelectedOrder(null);
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao cancelar pedido");
     },
   });
 
@@ -1000,16 +1034,25 @@ export default function Garcom() {
                 )}
 
                 {selectedOrder.status === "ready" && (
-                  <Button
-                    className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700"
-                    onClick={() => {
-                      deliverMutation.mutate(selectedOrder.id);
-                    }}
-                    disabled={deliverMutation.isPending}
-                  >
-                    <CheckCircle className="h-6 w-6 mr-2" />
-                    Entregar Pedido
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      className="flex-1 h-14 text-lg font-bold bg-green-600 hover:bg-green-700"
+                      onClick={() => {
+                        deliverMutation.mutate(selectedOrder.id);
+                      }}
+                      disabled={deliverMutation.isPending}
+                    >
+                      <CheckCircle className="h-6 w-6 mr-2" />
+                      Entregar Pedido
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      className="h-14"
+                      onClick={() => setCancelOrderId(selectedOrder.id)}
+                    >
+                      <XCircle className="h-6 w-6" />
+                    </Button>
+                  </div>
                 )}
                 {selectedOrder.status === "delivered" && (
                   <Button
@@ -1023,8 +1066,73 @@ export default function Garcom() {
                     Fechar Comanda
                   </Button>
                 )}
+                {["pending", "confirmed", "preparing"].includes(selectedOrder.status) && (
+                  <Button
+                    variant="destructive"
+                    className="w-full h-14 text-lg font-bold"
+                    onClick={() => setCancelOrderId(selectedOrder.id)}
+                  >
+                    <XCircle className="h-6 w-6 mr-2" />
+                    Cancelar Pedido
+                  </Button>
+                )}
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Cancel Order Dialog */}
+        <Dialog open={!!cancelOrderId} onOpenChange={(open) => {
+          if (!open) {
+            setCancelOrderId(null);
+            setCancelReason("");
+          }
+        }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-6 w-6" />
+                Cancelar Pedido
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <p className="text-muted-foreground">
+                Informe o motivo do cancelamento. Esta ação não pode ser desfeita.
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="cancel-reason">Motivo do Cancelamento *</Label>
+                <Input
+                  id="cancel-reason"
+                  placeholder="Ex: Cliente desistiu, item indisponível..."
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setCancelOrderId(null);
+                    setCancelReason("");
+                  }}
+                >
+                  Voltar
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={() => {
+                    if (cancelOrderId) {
+                      cancelOrderMutation.mutate({ orderId: cancelOrderId, reason: cancelReason });
+                    }
+                  }}
+                  disabled={cancelOrderMutation.isPending || !cancelReason.trim()}
+                >
+                  Confirmar Cancelamento
+                </Button>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
 
