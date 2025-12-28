@@ -61,6 +61,7 @@ interface Reservation {
   status: string;
   notes: string | null;
   created_at: string;
+  reminder_sent_at: string | null;
 }
 
 const statusConfig = {
@@ -475,11 +476,19 @@ export default function Reservas() {
                                   </span>
                                 </TableCell>
                                 <TableCell>
-                                  <Badge
-                                    className={`${statusConfig[reservation.status as keyof typeof statusConfig]?.color} text-white`}
-                                  >
-                                    {statusConfig[reservation.status as keyof typeof statusConfig]?.label}
-                                  </Badge>
+                                  <div className="flex items-center gap-2">
+                                    <Badge
+                                      className={`${statusConfig[reservation.status as keyof typeof statusConfig]?.color} text-white`}
+                                    >
+                                      {statusConfig[reservation.status as keyof typeof statusConfig]?.label}
+                                    </Badge>
+                                    {reservation.reminder_sent_at && (
+                                      <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50">
+                                        <Bell className="h-3 w-3 mr-1" />
+                                        Lembrado
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex gap-2">
