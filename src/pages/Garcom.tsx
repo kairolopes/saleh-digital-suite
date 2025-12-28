@@ -15,6 +15,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Bell,
   BellRing,
@@ -31,6 +36,12 @@ import {
   ChefHat,
   HandPlatter,
   X,
+  Plus,
+  Minus,
+  ShoppingCart,
+  UtensilsCrossed,
+  Trash2,
+  Split,
 } from "lucide-react";
 
 interface OrderItem {
@@ -80,15 +91,46 @@ const statusConfig = {
   cancelled: { label: "Cancelado", color: "bg-red-500", textColor: "text-red-600" },
 };
 
+interface MenuItem {
+  id: string;
+  recipe_id: string;
+  sell_price: number;
+  category: string;
+  is_available: boolean;
+  recipes?: {
+    name: string;
+    description: string | null;
+    image_url: string | null;
+  } | null;
+}
+
+interface PaymentSplit {
+  method: string;
+  amount: number;
+}
+
 export default function Garcom() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
-  const [selectedPayment, setSelectedPayment] = useState("");
   const [readyAlert, setReadyAlert] = useState<Order | null>(null);
   const [waiterCalls, setWaiterCalls] = useState<any[]>([]);
+  
+  // Split payment state
+  const [useSplitPayment, setUseSplitPayment] = useState(false);
+  const [paymentSplits, setPaymentSplits] = useState<PaymentSplit[]>([{ method: "", amount: 0 }]);
+  const [singlePaymentMethod, setSinglePaymentMethod] = useState("");
+
+  // Menu and new order state
+  const [showMenuDialog, setShowMenuDialog] = useState(false);
+  const [showNewOrderDialog, setShowNewOrderDialog] = useState(false);
+  const [cart, setCart] = useState<{ menuItem: MenuItem; quantity: number; notes: string }[]>([]);
+  const [orderType, setOrderType] = useState<"local" | "delivery" | "takeout">("local");
+  const [tableNumber, setTableNumber] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
 
   // Elapsed time hook for live counters
   const { getElapsedTime, getUrgencyColor } = useElapsedTime(30000);
@@ -113,6 +155,20 @@ export default function Garcom() {
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data as Order[];
+    },
+  });
+
+  // Fetch menu items for viewing and creating orders
+  const { data: menuItems } = useQuery({
+    queryKey: ["menu-items-available"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("menu_items")
+        .select(`*, recipes:recipe_id (name, description, image_url)`)
+        .eq("is_available", true)
+        .order("category");
+      if (error) throw error;
+      return data as MenuItem[];
     },
   });
 
@@ -253,11 +309,56 @@ export default function Garcom() {
       queryClient.invalidateQueries({ queryKey: ["waiter-orders"] });
       toast.success("Comanda fechada!");
       setPaymentOrder(null);
-      setSelectedPayment("");
+      setUseSplitPayment(false);
+      setPaymentSplits([{ method: "", amount: 0 }]);
+      setSinglePaymentMethod("");
       setSelectedOrder(null);
     },
     onError: () => {
       toast.error("Erro ao fechar comanda");
+    },
+  });
+
+  // Create order mutation
+  const createOrderMutation = useMutation({
+    mutationFn: async () => {
+      if (cart.length === 0) throw new Error("Carrinho vazio");
+      const subtotal = cart.reduce((sum, item) => sum + item.menuItem.sell_price * item.quantity, 0);
+      const { data: newOrder, error: orderError } = await supabase
+        .from("orders")
+        .insert({
+          order_type: orderType,
+          table_number: orderType === "local" ? tableNumber : null,
+          customer_name: customerName || null,
+          customer_phone: customerPhone || null,
+          subtotal,
+          total: subtotal,
+          status: "pending",
+          waiter_id: user?.id,
+        })
+        .select()
+        .single();
+      if (orderError) throw orderError;
+      const orderItems = cart.map((item) => ({
+        order_id: newOrder.id,
+        menu_item_id: item.menuItem.id,
+        quantity: item.quantity,
+        unit_price: item.menuItem.sell_price,
+        total_price: item.menuItem.sell_price * item.quantity,
+        notes: item.notes || null,
+        status: "pending",
+      }));
+      const { error: itemsError } = await supabase.from("order_items").insert(orderItems);
+      if (itemsError) throw itemsError;
+      return newOrder;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["waiter-orders"] });
+      toast.success("Pedido criado com sucesso!");
+      resetNewOrder();
+    },
+    onError: () => {
+      toast.error("Erro ao criar pedido");
     },
   });
 
@@ -272,12 +373,84 @@ export default function Garcom() {
   const preparingOrders = orders?.filter((o) => o.status === "preparing") || [];
   const pendingOrders = orders?.filter((o) => ["pending", "confirmed"].includes(o.status)) || [];
 
-  const handleConfirmPayment = () => {
-    if (!paymentOrder || !selectedPayment) {
-      toast.error("Selecione a forma de pagamento");
-      return;
+  const groupedMenuItems = menuItems?.reduce((acc, item) => {
+    if (!acc[item.category]) acc[item.category] = [];
+    acc[item.category].push(item);
+    return acc;
+  }, {} as Record<string, MenuItem[]>);
+
+  const addToCart = (menuItem: MenuItem) => {
+    const existing = cart.find((item) => item.menuItem.id === menuItem.id);
+    if (existing) {
+      setCart(cart.map((item) => item.menuItem.id === menuItem.id ? { ...item, quantity: item.quantity + 1 } : item));
+    } else {
+      setCart([...cart, { menuItem, quantity: 1, notes: "" }]);
     }
-    closeOrderMutation.mutate({ orderId: paymentOrder.id, paymentMethod: selectedPayment });
+  };
+
+  const updateCartQuantity = (menuItemId: string, delta: number) => {
+    setCart(cart.map((item) => item.menuItem.id === menuItemId ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item).filter((item) => item.quantity > 0));
+  };
+
+  const cartTotal = cart.reduce((sum, item) => sum + item.menuItem.sell_price * item.quantity, 0);
+
+  const resetNewOrder = () => {
+    setCart([]);
+    setOrderType("local");
+    setTableNumber("");
+    setCustomerName("");
+    setCustomerPhone("");
+    setShowNewOrderDialog(false);
+  };
+
+  // Split payment helpers
+  const addPaymentSplit = () => {
+    setPaymentSplits([...paymentSplits, { method: "", amount: 0 }]);
+  };
+
+  const removePaymentSplit = (index: number) => {
+    if (paymentSplits.length > 1) {
+      setPaymentSplits(paymentSplits.filter((_, i) => i !== index));
+    }
+  };
+
+  const updatePaymentSplit = (index: number, field: "method" | "amount", value: string | number) => {
+    const updated = [...paymentSplits];
+    if (field === "method") {
+      updated[index].method = value as string;
+    } else {
+      updated[index].amount = Number(value);
+    }
+    setPaymentSplits(updated);
+  };
+
+  const splitTotal = paymentSplits.reduce((sum, p) => sum + p.amount, 0);
+  const remainingAmount = (paymentOrder?.total || 0) - splitTotal;
+
+  const handleConfirmPayment = () => {
+    if (!paymentOrder) return;
+
+    if (useSplitPayment) {
+      // Validate split payments
+      const invalidSplits = paymentSplits.some(p => !p.method || p.amount <= 0);
+      if (invalidSplits) {
+        toast.error("Preencha todos os valores e formas de pagamento");
+        return;
+      }
+      if (Math.abs(remainingAmount) > 0.01) {
+        toast.error("A soma dos valores deve ser igual ao total");
+        return;
+      }
+      // Format payment method string for split payment
+      const paymentMethodStr = paymentSplits.map(p => `${p.method}:${p.amount.toFixed(2)}`).join("|");
+      closeOrderMutation.mutate({ orderId: paymentOrder.id, paymentMethod: paymentMethodStr });
+    } else {
+      if (!singlePaymentMethod) {
+        toast.error("Selecione a forma de pagamento");
+        return;
+      }
+      closeOrderMutation.mutate({ orderId: paymentOrder.id, paymentMethod: singlePaymentMethod });
+    }
   };
 
   return (
@@ -295,7 +468,15 @@ export default function Garcom() {
                 <p className="text-muted-foreground text-sm">Acompanhe seus pedidos</p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={() => setShowMenuDialog(true)}>
+                <UtensilsCrossed className="h-4 w-4 mr-2" />
+                Ver Cardápio
+              </Button>
+              <Button onClick={() => setShowNewOrderDialog(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Novo Pedido
+              </Button>
               <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-muted/50">
                 <span className="text-sm font-medium">Som</span>
                 <Switch checked={soundEnabled} onCheckedChange={setSoundEnabled} />
@@ -812,9 +993,16 @@ export default function Garcom() {
           </DialogContent>
         </Dialog>
 
-        {/* Payment Dialog */}
-        <Dialog open={!!paymentOrder} onOpenChange={(open) => !open && setPaymentOrder(null)}>
-          <DialogContent className="sm:max-w-md">
+        {/* Payment Dialog with Split Option */}
+        <Dialog open={!!paymentOrder} onOpenChange={(open) => {
+          if (!open) {
+            setPaymentOrder(null);
+            setUseSplitPayment(false);
+            setPaymentSplits([{ method: "", amount: 0 }]);
+            setSinglePaymentMethod("");
+          }
+        }}>
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-2xl text-center">
                 Fechar Comanda #{paymentOrder?.order_number}
@@ -828,34 +1016,268 @@ export default function Garcom() {
                 </p>
               </div>
 
-              <div className="space-y-3">
-                <p className="font-semibold text-center">Forma de Pagamento</p>
-                <div className="grid grid-cols-2 gap-4">
-                  {paymentMethods.map((method) => (
-                    <Button
-                      key={method.value}
-                      type="button"
-                      variant={selectedPayment === method.value ? "default" : "outline"}
-                      className={`h-20 flex flex-col gap-2 text-base ${
-                        selectedPayment === method.value ? method.color : ""
-                      }`}
-                      onClick={() => setSelectedPayment(method.value)}
-                    >
-                      <method.icon className="h-8 w-8" />
-                      <span className="font-bold">{method.label}</span>
-                    </Button>
-                  ))}
-                </div>
+              {/* Toggle split payment */}
+              <div className="flex items-center justify-center gap-3">
+                <Button
+                  variant={!useSplitPayment ? "default" : "outline"}
+                  onClick={() => setUseSplitPayment(false)}
+                  className="flex-1"
+                >
+                  Pagamento Único
+                </Button>
+                <Button
+                  variant={useSplitPayment ? "default" : "outline"}
+                  onClick={() => setUseSplitPayment(true)}
+                  className="flex-1"
+                >
+                  <Split className="h-4 w-4 mr-2" />
+                  Dividir Pagamento
+                </Button>
               </div>
+
+              {!useSplitPayment ? (
+                <div className="space-y-3">
+                  <p className="font-semibold text-center">Forma de Pagamento</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    {paymentMethods.map((method) => (
+                      <Button
+                        key={method.value}
+                        type="button"
+                        variant={singlePaymentMethod === method.value ? "default" : "outline"}
+                        className={`h-20 flex flex-col gap-2 text-base ${
+                          singlePaymentMethod === method.value ? method.color : ""
+                        }`}
+                        onClick={() => setSinglePaymentMethod(method.value)}
+                      >
+                        <method.icon className="h-8 w-8" />
+                        <span className="font-bold">{method.label}</span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="font-semibold text-center">Dividir em múltiplas formas</p>
+                  
+                  {paymentSplits.map((split, index) => (
+                    <div key={index} className="flex items-center gap-2 p-3 border rounded-lg bg-muted/30">
+                      <Select value={split.method} onValueChange={(v) => updatePaymentSplit(index, "method", v)}>
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Forma" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paymentMethods.map((m) => (
+                            <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">R$</span>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="pl-10"
+                          value={split.amount || ""}
+                          onChange={(e) => updatePaymentSplit(index, "amount", e.target.value)}
+                          placeholder="0,00"
+                        />
+                      </div>
+                      {paymentSplits.length > 1 && (
+                        <Button variant="ghost" size="icon" onClick={() => removePaymentSplit(index)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+
+                  <Button variant="outline" onClick={addPaymentSplit} className="w-full">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Adicionar Forma de Pagamento
+                  </Button>
+
+                  <div className={`text-center p-3 rounded-lg ${Math.abs(remainingAmount) < 0.01 ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
+                    <p className="text-sm font-medium">
+                      {Math.abs(remainingAmount) < 0.01 
+                        ? "✓ Valor completo" 
+                        : remainingAmount > 0 
+                          ? `Faltam ${formatCurrency(remainingAmount)}`
+                          : `Excedente de ${formatCurrency(Math.abs(remainingAmount))}`}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <Button
                 className="w-full h-14 text-lg font-bold"
                 onClick={handleConfirmPayment}
-                disabled={!selectedPayment || closeOrderMutation.isPending}
+                disabled={closeOrderMutation.isPending || (useSplitPayment ? Math.abs(remainingAmount) > 0.01 : !singlePaymentMethod)}
               >
                 <CheckCircle className="h-6 w-6 mr-2" />
                 Confirmar Pagamento
               </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Menu View Dialog */}
+        <Dialog open={showMenuDialog} onOpenChange={setShowMenuDialog}>
+          <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-hidden">
+            <DialogHeader>
+              <DialogTitle className="text-2xl flex items-center gap-2">
+                <UtensilsCrossed className="h-6 w-6" />
+                Cardápio
+              </DialogTitle>
+            </DialogHeader>
+            <ScrollArea className="h-[70vh] pr-4">
+              <div className="space-y-6">
+                {Object.entries(groupedMenuItems || {}).map(([category, items]) => (
+                  <div key={category}>
+                    <h3 className="font-bold text-lg mb-3 text-primary border-b pb-2">{category}</h3>
+                    <div className="grid gap-3">
+                      {items.map((item) => (
+                        <div key={item.id} className="flex gap-4 p-3 rounded-lg border bg-card">
+                          {item.recipes?.image_url && (
+                            <img 
+                              src={item.recipes.image_url} 
+                              alt={item.recipes?.name} 
+                              className="w-20 h-20 object-cover rounded-lg"
+                            />
+                          )}
+                          <div className="flex-1">
+                            <h4 className="font-semibold">{item.recipes?.name}</h4>
+                            {item.recipes?.description && (
+                              <p className="text-sm text-muted-foreground line-clamp-2">{item.recipes.description}</p>
+                            )}
+                            <p className="text-primary font-bold mt-1">{formatCurrency(item.sell_price)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
+
+        {/* New Order Dialog */}
+        <Dialog open={showNewOrderDialog} onOpenChange={setShowNewOrderDialog}>
+          <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-xl">Novo Pedido</DialogTitle>
+            </DialogHeader>
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Menu side */}
+              <div className="space-y-4">
+                <h3 className="font-semibold text-lg">Cardápio</h3>
+                <ScrollArea className="h-[50vh]">
+                  <div className="space-y-4 pr-4">
+                    {Object.entries(groupedMenuItems || {}).map(([category, items]) => (
+                      <div key={category}>
+                        <h4 className="font-medium text-muted-foreground text-sm mb-2">{category}</h4>
+                        <div className="space-y-2">
+                          {items.map((item) => (
+                            <div 
+                              key={item.id} 
+                              className="flex justify-between items-center p-3 rounded-lg border hover:bg-muted/50 cursor-pointer transition-colors" 
+                              onClick={() => addToCart(item)}
+                            >
+                              <div>
+                                <p className="font-medium">{item.recipes?.name}</p>
+                                <p className="text-sm text-primary font-semibold">{formatCurrency(item.sell_price)}</p>
+                              </div>
+                              <Plus className="h-5 w-5 text-primary" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+
+              {/* Cart and details side */}
+              <div className="space-y-4">
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label>Tipo de Pedido</Label>
+                    <Select value={orderType} onValueChange={(v) => setOrderType(v as "local" | "delivery" | "takeout")}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="local">Mesa</SelectItem>
+                        <SelectItem value="delivery">Delivery</SelectItem>
+                        <SelectItem value="takeout">Retirada</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {orderType === "local" && (
+                    <div className="space-y-2">
+                      <Label>Número da Mesa</Label>
+                      <Input value={tableNumber} onChange={(e) => setTableNumber(e.target.value)} placeholder="Ex: 5" />
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2">
+                      <Label>Cliente</Label>
+                      <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Nome" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Telefone</Label>
+                      <Input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="(00) 00000-0000" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <ShoppingCart className="h-5 w-5" />
+                    <h3 className="font-semibold">Carrinho ({cart.length} itens)</h3>
+                  </div>
+                  {cart.length === 0 ? (
+                    <p className="text-center py-4 text-muted-foreground">Carrinho vazio</p>
+                  ) : (
+                    <div className="space-y-2 max-h-[25vh] overflow-y-auto">
+                      {cart.map((item) => (
+                        <div key={item.menuItem.id} className="flex justify-between items-center p-3 rounded-lg border">
+                          <div>
+                            <span className="font-medium">{item.menuItem.recipes?.name}</span>
+                            <p className="text-primary font-bold text-sm">{formatCurrency(item.menuItem.sell_price * item.quantity)}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantity(item.menuItem.id, -1)}>
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            <span className="w-6 text-center font-medium">{item.quantity}</span>
+                            <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantity(item.menuItem.id, 1)}>
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t pt-4">
+                  <div className="flex justify-between items-center text-lg font-bold mb-4">
+                    <span>Total:</span>
+                    <span className="text-primary">{formatCurrency(cartTotal)}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1" onClick={resetNewOrder}>Cancelar</Button>
+                    <Button 
+                      className="flex-1" 
+                      onClick={() => createOrderMutation.mutate()} 
+                      disabled={cart.length === 0 || createOrderMutation.isPending}
+                    >
+                      Criar Pedido
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

@@ -38,7 +38,7 @@ const menuItems = [
     title: 'Dashboard', 
     icon: LayoutDashboard, 
     path: '/', 
-    roles: ['admin', 'financeiro', 'estoque', 'garcom'] 
+    roles: ['admin', 'financeiro', 'estoque'] 
   },
   { 
     title: 'Estoque', 
@@ -74,7 +74,7 @@ const menuItems = [
     title: 'Cardápio', 
     icon: ClipboardList, 
     path: '/cardapio', 
-    roles: ['admin', 'garcom'] 
+    roles: ['admin'] 
   },
   { 
     title: 'Pedidos', 
@@ -122,7 +122,7 @@ const menuItems = [
     title: 'Reservas', 
     icon: CalendarDays, 
     path: '/reservas', 
-    roles: ['admin', 'garcom'] 
+    roles: ['admin'] 
   },
   { 
     title: 'Configurações', 
