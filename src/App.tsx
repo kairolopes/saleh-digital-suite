@@ -15,6 +15,8 @@ import Cardapio from "./pages/Cardapio";
 import Pedidos from "./pages/Pedidos";
 import Cozinha from "./pages/Cozinha";
 import Financeiro from "./pages/Financeiro";
+import Cliente from "./pages/Cliente";
+import QRCodeMesas from "./pages/QRCodeMesas";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -38,6 +40,8 @@ const App = () => (
             <Route path="/pedidos" element={<Pedidos />} />
             <Route path="/cozinha" element={<Cozinha />} />
             <Route path="/financeiro" element={<Financeiro />} />
+            <Route path="/cliente" element={<Cliente />} />
+            <Route path="/qrcodes" element={<QRCodeMesas />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
