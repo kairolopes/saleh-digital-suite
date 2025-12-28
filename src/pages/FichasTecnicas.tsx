@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +22,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, X } from "lucide-react";
+import { Plus, Search, X, Upload, Image as ImageIcon, Clock } from "lucide-react";
 
 interface Product {
   id: string;
@@ -33,6 +34,9 @@ interface Product {
 interface Recipe {
   id: string;
   name: string;
+  description: string | null;
+  image_url: string | null;
+  preparation_time: number | null;
   recipe_type: string;
   yield_quantity: number;
   yield_unit: string | null;
@@ -52,8 +56,11 @@ interface RecipeItem {
 interface RecipeFormData {
   is_subproduct: boolean;
   name: string;
+  description: string;
+  preparation_time: number;
   yield_quantity: number;
   profit_percent: number;
+  image_url: string | null;
   ingredients: {
     product_id: string | null;
     subrecipe_id: string | null;
@@ -75,10 +82,15 @@ export default function FichasTecnicas() {
   const [formData, setFormData] = useState<RecipeFormData>({
     is_subproduct: false,
     name: "",
+    description: "",
+    preparation_time: 0,
     yield_quantity: 1,
     profit_percent: 0,
+    image_url: null,
     ingredients: [],
   });
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [ingredientType, setIngredientType] = useState<"product" | "subrecipe">("product");
   const [currentIngredient, setCurrentIngredient] = useState({
     item_id: "",
@@ -163,6 +175,34 @@ export default function FichasTecnicas() {
     return totalCost;
   };
 
+  // Upload image to storage
+  const handleImageUpload = async (file: File) => {
+    try {
+      setUploadingImage(true);
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const filePath = `recipes/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("recipe-images")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from("recipe-images")
+        .getPublicUrl(filePath);
+
+      setFormData({ ...formData, image_url: urlData.publicUrl });
+      toast({ title: "Imagem enviada com sucesso!" });
+    } catch (error) {
+      console.error(error);
+      toast({ title: "Erro ao enviar imagem", variant: "destructive" });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   // Create recipe mutation
   const createMutation = useMutation({
     mutationFn: async (data: RecipeFormData) => {
@@ -170,6 +210,9 @@ export default function FichasTecnicas() {
         .from("recipes")
         .insert({
           name: data.is_subproduct ? `SP ${data.name}` : data.name,
+          description: data.description || null,
+          preparation_time: data.preparation_time || null,
+          image_url: data.image_url,
           recipe_type: data.is_subproduct ? "subproduto" : "prato_final",
           yield_quantity: data.yield_quantity,
           yield_unit: "porções",
@@ -253,6 +296,9 @@ export default function FichasTecnicas() {
         .from("recipes")
         .update({
           name: data.is_subproduct ? `SP ${data.name.replace(/^SP\s*/i, "")}` : data.name.replace(/^SP\s*/i, ""),
+          description: data.description || null,
+          preparation_time: data.preparation_time || null,
+          image_url: data.image_url,
           recipe_type: data.is_subproduct ? "subproduto" : "prato_final",
           yield_quantity: data.yield_quantity,
         })
@@ -341,8 +387,11 @@ export default function FichasTecnicas() {
     setFormData({
       is_subproduct: false,
       name: "",
+      description: "",
+      preparation_time: 0,
       yield_quantity: 1,
       profit_percent: 0,
+      image_url: null,
       ingredients: [],
     });
     setIngredientType("product");
@@ -384,8 +433,11 @@ export default function FichasTecnicas() {
     setFormData({
       is_subproduct: isSubproduct,
       name: recipe.name.replace(/^SP\s*/i, ""),
+      description: recipe.description || "",
+      preparation_time: recipe.preparation_time || 0,
       yield_quantity: recipe.yield_quantity,
       profit_percent: Math.round(profitPercent * 100) / 100,
+      image_url: recipe.image_url,
       ingredients,
     });
     setIngredientType("product");
@@ -545,15 +597,37 @@ export default function FichasTecnicas() {
               const price50 = costPerPortion / 0.5;
 
               return (
-                <Card key={recipe.id} className="bg-card border-border">
+                <Card key={recipe.id} className="bg-card border-border overflow-hidden">
+                  {/* Recipe Image */}
+                  {recipe.image_url && (
+                    <div className="relative h-40 overflow-hidden">
+                      <img
+                        src={recipe.image_url}
+                        alt={recipe.name}
+                        className="w-full h-full object-cover"
+                      />
+                      {recipe.preparation_time && (
+                        <div className="absolute bottom-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-sm flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {recipe.preparation_time} min
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <CardContent className="p-6">
                     {/* Header with name and actions */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
                         <h3 className="text-xl font-bold text-foreground">{recipe.name}</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Rendimento: {recipe.yield_quantity} porções
-                        </p>
+                        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                          <span>Rendimento: {recipe.yield_quantity} porções</span>
+                          {recipe.preparation_time && !recipe.image_url && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {recipe.preparation_time} min
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <Button
@@ -574,6 +648,13 @@ export default function FichasTecnicas() {
                         </Button>
                       </div>
                     </div>
+
+                    {/* Description */}
+                    {recipe.description && (
+                      <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+                        {recipe.description}
+                      </p>
+                    )}
 
                     {/* Cost and Price Section */}
                     <div className="grid grid-cols-2 gap-4 mb-4">
@@ -706,8 +787,84 @@ export default function FichasTecnicas() {
                 />
               </div>
 
-              {/* Yield and Profit */}
-              <div className="grid grid-cols-2 gap-4">
+              {/* Description */}
+              <div className="space-y-2">
+                <Label htmlFor="description">Descrição do Prato</Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Descreva o prato para o cliente (ingredientes principais, modo de preparo, etc.)"
+                  rows={3}
+                />
+              </div>
+
+              {/* Image Upload */}
+              <div className="space-y-2">
+                <Label>Foto do Prato</Label>
+                <div className="flex gap-4 items-start">
+                  {formData.image_url ? (
+                    <div className="relative">
+                      <img
+                        src={formData.image_url}
+                        alt="Foto do prato"
+                        className="w-32 h-32 object-cover rounded-lg border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute -top-2 -right-2 h-6 w-6"
+                        onClick={() => setFormData({ ...formData, image_url: null })}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div 
+                      className="w-32 h-32 border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary transition-colors"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground mt-1">Adicionar foto</span>
+                    </div>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImageUpload(file);
+                    }}
+                  />
+                  <div className="flex-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingImage}
+                      className="w-full"
+                    >
+                      {uploadingImage ? (
+                        "Enviando..."
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          {formData.image_url ? "Trocar Foto" : "Enviar Foto"}
+                        </>
+                      )}
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Formatos: JPG, PNG, WebP. Max 5MB.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Yield, Prep Time and Profit */}
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="yield">Rendimento (porções)</Label>
                   <Input
@@ -721,6 +878,23 @@ export default function FichasTecnicas() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="prep_time">Tempo de Preparo (min)</Label>
+                  <div className="relative">
+                    <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="prep_time"
+                      type="number"
+                      min="0"
+                      className="pl-10"
+                      value={formData.preparation_time || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, preparation_time: parseInt(e.target.value) || 0 })
+                      }
+                      placeholder="15"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="profit_percent">Lucro (%)</Label>
                   <Input
                     id="profit_percent"
@@ -730,7 +904,7 @@ export default function FichasTecnicas() {
                     onChange={(e) =>
                       setFormData({ ...formData, profit_percent: parseDecimal(e.target.value) })
                     }
-                    placeholder="Ex: 10 para 10%"
+                    placeholder="Ex: 10"
                   />
                   <p className="text-xs text-muted-foreground">
                     Preço = Custo + {formData.profit_percent}%

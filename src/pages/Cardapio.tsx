@@ -22,7 +22,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Pencil, Trash2, UtensilsCrossed } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, UtensilsCrossed, Clock } from "lucide-react";
 
 interface Recipe {
   id: string;
@@ -308,10 +308,31 @@ export default function Cardapio() {
                   {items.map((item) => (
                     <Card
                       key={item.id}
-                      className={`bg-card border-border transition-opacity ${
+                      className={`bg-card border-border transition-opacity overflow-hidden ${
                         !item.is_available ? "opacity-60" : ""
                       }`}
                     >
+                      {/* Recipe Image */}
+                      {item.recipes?.image_url && (
+                        <div className="relative h-40 overflow-hidden">
+                          <img
+                            src={item.recipes.image_url}
+                            alt={item.recipes.name}
+                            className="w-full h-full object-cover"
+                          />
+                          {!item.is_available && (
+                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                              <Badge variant="secondary" className="text-lg">Indisponível</Badge>
+                            </div>
+                          )}
+                          {item.recipes?.preparation_time && (
+                            <div className="absolute bottom-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-sm flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {item.recipes.preparation_time} min
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <CardContent className="p-4">
                         <div className="flex justify-between items-start gap-2">
                           <div className="flex-1 min-w-0">
@@ -327,13 +348,14 @@ export default function Cardapio() {
                               <span className="text-lg font-bold text-primary">
                                 {formatCurrency(item.sell_price)}
                               </span>
-                              {!item.is_available && (
+                              {!item.is_available && !item.recipes?.image_url && (
                                 <Badge variant="secondary">Indisponível</Badge>
                               )}
                             </div>
-                            {item.recipes?.preparation_time && (
-                              <p className="text-xs text-muted-foreground mt-1">
-                                ⏱ {item.recipes.preparation_time} min
+                            {item.recipes?.preparation_time && !item.recipes?.image_url && (
+                              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {item.recipes.preparation_time} min
                               </p>
                             )}
                           </div>
