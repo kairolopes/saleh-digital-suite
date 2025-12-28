@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useKitchenNotifications } from "@/hooks/useKitchenNotifications";
+import { useElapsedTime } from "@/hooks/useElapsedTime";
+import { PrepTimeIndicator } from "@/components/PrepTimeIndicator";
 import { Clock, CheckCircle, ChefHat, AlertTriangle, Bell, Volume2, VolumeX, XCircle, Phone, User } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -43,6 +45,7 @@ interface Order {
   notes: string | null;
   rejection_reason: string | null;
   created_at: string;
+  preparing_at: string | null;
   order_items?: OrderItem[];
 }
 
@@ -179,6 +182,15 @@ export default function Cozinha() {
   // Check if all items are done
   const allItemsDone = (order: Order) => {
     return order.order_items?.every((item) => item.status === "done") || false;
+  };
+
+  // Calculate estimated preparation time for an order (max of all items)
+  const getEstimatedPrepTime = (order: Order): number => {
+    if (!order.order_items?.length) return 15; // default 15 min
+    const times = order.order_items
+      .map((item) => item.menu_items?.recipes?.preparation_time || 10)
+      .filter((t) => t > 0);
+    return times.length > 0 ? Math.max(...times) : 15;
   };
 
   return (
@@ -480,24 +492,20 @@ export default function Cozinha() {
                               </p>
                             )}
                           </div>
-                          <Badge
-                            className={`text-lg px-3 py-1 ${
-                              getWaitingTime(order.created_at) > 20
-                                ? "bg-red-500 text-white"
-                                : "bg-orange-500 text-white"
-                            }`}
-                          >
-                            <Clock className="h-4 w-4 mr-1" />
-                            {getWaitingTime(order.created_at)}min
-                          </Badge>
+                          {order.customer_name && (
+                            <p className="text-orange-700 flex items-center gap-1 font-medium">
+                              <User className="h-4 w-4" />
+                              {order.customer_name}
+                            </p>
+                          )}
                         </div>
 
-                        {order.customer_name && (
-                          <p className="text-orange-700 flex items-center gap-1 font-medium mb-3">
-                            <User className="h-4 w-4" />
-                            {order.customer_name}
-                          </p>
-                        )}
+                        {/* Timer Visual - Estimated vs Real Time */}
+                        <PrepTimeIndicator
+                          estimatedMinutes={getEstimatedPrepTime(order)}
+                          startTime={order.preparing_at || order.created_at}
+                          className="mb-4"
+                        />
 
                         <div className="space-y-2 mb-4">
                           {order.order_items?.map((item) => (
