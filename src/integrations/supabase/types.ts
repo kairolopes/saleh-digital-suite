@@ -318,6 +318,8 @@ export type Database = {
       }
       orders: {
         Row: {
+          cancelled_at: string | null
+          cancelled_by: string | null
           confirmed_at: string | null
           created_at: string | null
           customer_name: string | null
@@ -341,6 +343,8 @@ export type Database = {
           waiter_id: string | null
         }
         Insert: {
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           confirmed_at?: string | null
           created_at?: string | null
           customer_name?: string | null
@@ -364,6 +368,8 @@ export type Database = {
           waiter_id?: string | null
         }
         Update: {
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           confirmed_at?: string | null
           created_at?: string | null
           customer_name?: string | null

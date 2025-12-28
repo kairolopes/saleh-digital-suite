@@ -29,6 +29,7 @@ import {
   TrendingUp,
   Package,
   DollarSign,
+  XCircle,
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths, parseISO, eachDayOfInterval } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -274,6 +275,57 @@ export default function Relatorios() {
     },
   });
 
+  // Cancellations Report (orders cancelled by waiters)
+  const { data: cancellationsReport, isLoading: loadingCancellations } = useQuery({
+    queryKey: ["cancellations-report", dateRange],
+    queryFn: async () => {
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select(`
+          id,
+          order_number,
+          total,
+          rejection_reason,
+          cancelled_at,
+          cancelled_by,
+          table_number,
+          customer_name,
+          created_at
+        `)
+        .eq("status", "cancelled")
+        .not("cancelled_by", "is", null)
+        .gte("created_at", dateRange.start)
+        .lte("created_at", dateRange.end + "T23:59:59")
+        .order("cancelled_at", { ascending: false });
+
+      if (error) throw error;
+
+      // Fetch waiter profiles
+      const waiterIds = [...new Set(orders?.map(o => o.cancelled_by).filter(Boolean))];
+      let waitersMap: Record<string, string> = {};
+      
+      if (waiterIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, full_name")
+          .in("id", waiterIds);
+        
+        profiles?.forEach((p: any) => {
+          waitersMap[p.id] = p.full_name;
+        });
+      }
+
+      return {
+        cancellations: orders?.map(o => ({
+          ...o,
+          waiter_name: waitersMap[o.cancelled_by as string] || "Desconhecido"
+        })) || [],
+        totalCancelled: orders?.length || 0,
+        totalValue: orders?.reduce((sum, o) => sum + (o.total || 0), 0) || 0,
+      };
+    },
+  });
+
   // Financial Report
   const { data: financialReport, isLoading: loadingFinancial } = useQuery({
     queryKey: ["financial-report", dateRange],
@@ -432,7 +484,7 @@ export default function Relatorios() {
 
         {/* Reports Tabs */}
         <Tabs defaultValue="sales" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="sales" className="flex items-center gap-2">
               <TrendingUp className="h-4 w-4" />
               Vendas
@@ -444,6 +496,10 @@ export default function Relatorios() {
             <TabsTrigger value="financial" className="flex items-center gap-2">
               <DollarSign className="h-4 w-4" />
               Financeiro
+            </TabsTrigger>
+            <TabsTrigger value="cancellations" className="flex items-center gap-2">
+              <XCircle className="h-4 w-4" />
+              Cancelamentos
             </TabsTrigger>
           </TabsList>
 
@@ -1076,6 +1132,91 @@ export default function Relatorios() {
                           >
                             {entry.entry_type === "receita" ? "+" : "-"}
                             {formatCurrency(entry.amount)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Cancellations Report */}
+          <TabsContent value="cancellations" className="space-y-4">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Total de Cancelamentos
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-red-600">
+                    {cancellationsReport?.totalCancelled || 0} pedidos
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Valor Total Cancelado
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-red-600">
+                    {formatCurrency(cancellationsReport?.totalValue || 0)}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Cancellations Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <XCircle className="h-5 w-5 text-red-600" />
+                  Histórico de Cancelamentos por Garçons
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingCancellations ? (
+                  <p className="text-center py-4">Carregando...</p>
+                ) : cancellationsReport?.cancellations?.length === 0 ? (
+                  <p className="text-center py-8 text-muted-foreground">
+                    Nenhum cancelamento no período selecionado
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Data/Hora</TableHead>
+                        <TableHead>Pedido</TableHead>
+                        <TableHead>Mesa</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Garçom</TableHead>
+                        <TableHead>Motivo</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {cancellationsReport?.cancellations?.map((cancel: any) => (
+                        <TableRow key={cancel.id}>
+                          <TableCell>
+                            {cancel.cancelled_at 
+                              ? format(new Date(cancel.cancelled_at), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="font-medium">#{cancel.order_number}</TableCell>
+                          <TableCell>{cancel.table_number || "-"}</TableCell>
+                          <TableCell>{cancel.customer_name || "-"}</TableCell>
+                          <TableCell className="font-medium">{cancel.waiter_name}</TableCell>
+                          <TableCell className="max-w-xs truncate" title={cancel.rejection_reason || "-"}>
+                            {cancel.rejection_reason || "-"}
+                          </TableCell>
+                          <TableCell className="text-right text-red-600 font-medium">
+                            {formatCurrency(cancel.total || 0)}
                           </TableCell>
                         </TableRow>
                       ))}
