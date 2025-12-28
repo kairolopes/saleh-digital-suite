@@ -492,6 +492,36 @@ export default function Reservas() {
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex gap-2">
+                                    {(reservation.status === 'pending' || reservation.status === 'confirmed') && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-blue-600 hover:bg-blue-50"
+                                        title="Enviar lembrete"
+                                        onClick={async () => {
+                                          toast.info('Enviando lembrete...');
+                                          try {
+                                            const { data, error } = await supabase.functions.invoke('send-reservation-reminder', {
+                                              body: { reservationId: reservation.id },
+                                            });
+                                            if (error) throw error;
+                                            if (data?.error) {
+                                              toast.error(data.error === 'No webhook URL configured' 
+                                                ? 'URL de webhook não configurada' 
+                                                : data.error);
+                                            } else {
+                                              toast.success('Lembrete enviado com sucesso!');
+                                              queryClient.invalidateQueries({ queryKey: ['reservations'] });
+                                            }
+                                          } catch (err) {
+                                            console.error('Error sending reminder:', err);
+                                            toast.error('Erro ao enviar lembrete');
+                                          }
+                                        }}
+                                      >
+                                        <Bell className="h-4 w-4" />
+                                      </Button>
+                                    )}
                                     {reservation.status === 'pending' && (
                                       <>
                                         <Button
