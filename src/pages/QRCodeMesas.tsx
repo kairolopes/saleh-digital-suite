@@ -1,13 +1,15 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Download, Printer, Plus, QrCode } from "lucide-react";
+import { Download, Printer, QrCode, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
 export default function QRCodeMesas() {
+  const navigate = useNavigate();
   const [numberOfTables, setNumberOfTables] = useState(10);
   const [selectedTable, setSelectedTable] = useState<number | null>(null);
 
@@ -39,14 +41,19 @@ export default function QRCodeMesas() {
   return (
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between print:hidden">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <QrCode className="w-6 h-6" />
-            QR Codes das Mesas
-          </h1>
-          <p className="text-muted-foreground">
-            Gere QR Codes para os clientes acessarem o cardápio digital
-          </p>
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => navigate("/")}>
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <QrCode className="w-6 h-6" />
+              QR Codes das Mesas
+            </h1>
+            <p className="text-muted-foreground">
+              Gere QR Codes para os clientes acessarem o cardápio digital
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
