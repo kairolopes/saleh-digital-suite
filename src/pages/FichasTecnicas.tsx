@@ -21,7 +21,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 
 interface Product {
   id: string;
@@ -52,13 +52,19 @@ interface RecipeFormData {
   is_subproduct: boolean;
   name: string;
   yield_quantity: number;
-  sell_price: number;
+  profit_percent: number;
   ingredients: {
     product_id: string;
     quantity: number;
     unit: string;
   }[];
 }
+
+// Helper to parse decimal input (accepts both . and ,)
+const parseDecimal = (value: string): number => {
+  const normalized = value.replace(",", ".");
+  return parseFloat(normalized) || 0;
+};
 
 export default function FichasTecnicas() {
   const [search, setSearch] = useState("");
@@ -68,12 +74,12 @@ export default function FichasTecnicas() {
     is_subproduct: false,
     name: "",
     yield_quantity: 1,
-    sell_price: 0,
+    profit_percent: 0,
     ingredients: [],
   });
   const [currentIngredient, setCurrentIngredient] = useState({
     product_id: "",
-    quantity: 0,
+    quantity: "",
     unit: "",
   });
   const { toast } = useToast();
@@ -140,7 +146,6 @@ export default function FichasTecnicas() {
           totalCost += Number(item.quantity) * Number(product.average_price);
         }
       } else if (item.subrecipe_id) {
-        // Recursive cost calculation for subrecipes
         const subCost = calculateRecipeCost(item.subrecipe_id);
         const subRecipe = recipes?.find((r) => r.id === item.subrecipe_id);
         if (subRecipe && subRecipe.yield_quantity > 0) {
@@ -155,7 +160,6 @@ export default function FichasTecnicas() {
   // Create recipe mutation
   const createMutation = useMutation({
     mutationFn: async (data: RecipeFormData) => {
-      // Create recipe
       const { data: newRecipe, error: recipeError } = await supabase
         .from("recipes")
         .insert({
@@ -169,7 +173,6 @@ export default function FichasTecnicas() {
 
       if (recipeError) throw recipeError;
 
-      // Create recipe items
       if (data.ingredients.length > 0) {
         const items = data.ingredients.map((ing) => ({
           recipe_id: newRecipe.id,
@@ -184,11 +187,18 @@ export default function FichasTecnicas() {
         if (itemsError) throw itemsError;
       }
 
-      // Create menu item with sell price
-      if (data.sell_price > 0) {
+      // Calculate sell price based on cost + profit%
+      const totalCost = data.ingredients.reduce((sum, ing) => {
+        const product = products?.find((p) => p.id === ing.product_id);
+        return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+      }, 0);
+      const costPerPortion = totalCost / data.yield_quantity;
+      const sellPrice = costPerPortion * (1 + data.profit_percent / 100);
+
+      if (sellPrice > 0) {
         const { error: menuError } = await supabase.from("menu_items").insert({
           recipe_id: newRecipe.id,
-          sell_price: data.sell_price,
+          sell_price: sellPrice,
           category: "Pratos",
         });
         if (menuError) throw menuError;
@@ -212,7 +222,6 @@ export default function FichasTecnicas() {
   // Update recipe mutation
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: RecipeFormData }) => {
-      // Update recipe
       const { error: recipeError } = await supabase
         .from("recipes")
         .update({
@@ -224,7 +233,6 @@ export default function FichasTecnicas() {
 
       if (recipeError) throw recipeError;
 
-      // Delete existing items and recreate
       await supabase.from("recipe_items").delete().eq("recipe_id", id);
 
       if (data.ingredients.length > 0) {
@@ -241,17 +249,24 @@ export default function FichasTecnicas() {
         if (itemsError) throw itemsError;
       }
 
-      // Update or create menu item
+      // Calculate sell price based on cost + profit%
+      const totalCost = data.ingredients.reduce((sum, ing) => {
+        const product = products?.find((p) => p.id === ing.product_id);
+        return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+      }, 0);
+      const costPerPortion = totalCost / data.yield_quantity;
+      const sellPrice = costPerPortion * (1 + data.profit_percent / 100);
+
       const existingMenuItem = menuItems?.find((m) => m.recipe_id === id);
       if (existingMenuItem) {
         await supabase
           .from("menu_items")
-          .update({ sell_price: data.sell_price })
+          .update({ sell_price: sellPrice })
           .eq("recipe_id", id);
-      } else if (data.sell_price > 0) {
+      } else if (sellPrice > 0) {
         await supabase.from("menu_items").insert({
           recipe_id: id,
-          sell_price: data.sell_price,
+          sell_price: sellPrice,
           category: "Pratos",
         });
       }
@@ -292,10 +307,10 @@ export default function FichasTecnicas() {
       is_subproduct: false,
       name: "",
       yield_quantity: 1,
-      sell_price: 0,
+      profit_percent: 0,
       ingredients: [],
     });
-    setCurrentIngredient({ product_id: "", quantity: 0, unit: "" });
+    setCurrentIngredient({ product_id: "", quantity: "", unit: "" });
     setEditingRecipe(null);
     setIsDialogOpen(false);
   };
@@ -305,26 +320,38 @@ export default function FichasTecnicas() {
     const menuItem = menuItems?.find((m) => m.recipe_id === recipe.id);
     const isSubproduct = recipe.recipe_type === "subproduto" || recipe.name.startsWith("SP ");
 
+    // Calculate profit percent from sell price and cost
+    const ingredients = recipeItems
+      .filter((i) => i.product_id)
+      .map((i) => ({
+        product_id: i.product_id!,
+        quantity: Number(i.quantity),
+        unit: i.unit,
+      }));
+
+    const totalCost = ingredients.reduce((sum, ing) => {
+      const product = products?.find((p) => p.id === ing.product_id);
+      return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+    }, 0);
+    const costPerPortion = totalCost / recipe.yield_quantity;
+    const sellPrice = menuItem?.sell_price || 0;
+    const profitPercent = costPerPortion > 0 ? ((sellPrice - costPerPortion) / costPerPortion) * 100 : 0;
+
     setEditingRecipe(recipe);
     setFormData({
       is_subproduct: isSubproduct,
       name: recipe.name.replace(/^SP\s*/i, ""),
       yield_quantity: recipe.yield_quantity,
-      sell_price: menuItem?.sell_price || 0,
-      ingredients: recipeItems
-        .filter((i) => i.product_id)
-        .map((i) => ({
-          product_id: i.product_id!,
-          quantity: Number(i.quantity),
-          unit: i.unit,
-        })),
+      profit_percent: Math.round(profitPercent * 100) / 100,
+      ingredients,
     });
     setIsDialogOpen(true);
   };
 
   const handleAddIngredient = () => {
-    if (!currentIngredient.product_id || currentIngredient.quantity <= 0) {
-      toast({ title: "Selecione um insumo e quantidade", variant: "destructive" });
+    const qty = parseDecimal(currentIngredient.quantity);
+    if (!currentIngredient.product_id || qty <= 0) {
+      toast({ title: "Selecione um insumo e quantidade válida", variant: "destructive" });
       return;
     }
 
@@ -335,12 +362,12 @@ export default function FichasTecnicas() {
         ...formData.ingredients,
         {
           product_id: currentIngredient.product_id,
-          quantity: currentIngredient.quantity,
+          quantity: qty,
           unit: product?.unit || currentIngredient.unit,
         },
       ],
     });
-    setCurrentIngredient({ product_id: "", quantity: 0, unit: "" });
+    setCurrentIngredient({ product_id: "", quantity: "", unit: "" });
   };
 
   const handleRemoveIngredient = (index: number) => {
@@ -363,7 +390,7 @@ export default function FichasTecnicas() {
     }
   };
 
-  // Calculate ingredient cost based on average price
+  // Calculate ingredient cost based on average price * quantity
   const getIngredientCost = (productId: string, quantity: number): number => {
     const product = products?.find((p) => p.id === productId);
     if (!product) return 0;
@@ -375,6 +402,12 @@ export default function FichasTecnicas() {
     return formData.ingredients.reduce((total, ing) => {
       return total + getIngredientCost(ing.product_id, ing.quantity);
     }, 0);
+  };
+
+  // Calculate sell price: cost + profit%
+  const getFormSellPrice = (): number => {
+    const costPerPortion = getFormTotalCost() / formData.yield_quantity;
+    return costPerPortion * (1 + formData.profit_percent / 100);
   };
 
   const filteredRecipes = recipes?.filter((recipe) =>
@@ -424,11 +457,12 @@ export default function FichasTecnicas() {
               const menuItem = menuItems?.find((m) => m.recipe_id === recipe.id);
               const sellPrice = menuItem?.sell_price || 0;
               const profit = sellPrice - costPerPortion;
+              const profitPercent = costPerPortion > 0 ? (profit / costPerPortion) * 100 : 0;
               const cmvPercent = sellPrice > 0 ? (costPerPortion / sellPrice) * 100 : 0;
               const markup = costPerPortion > 0 ? sellPrice / costPerPortion : 0;
               const recipeIngredients = allRecipeItems?.filter((i) => i.recipe_id === recipe.id) || [];
 
-              // CMV suggestions
+              // CMV suggestions (price = cost / CMV%)
               const price30 = costPerPortion / 0.3;
               const price40 = costPerPortion / 0.4;
               const price50 = costPerPortion / 0.5;
@@ -488,6 +522,9 @@ export default function FichasTecnicas() {
                         </p>
                         <p className="text-sm text-muted-foreground">
                           Lucro unitário: R$ {profit.toFixed(2)}
+                        </p>
+                        <p className="text-sm text-green-600">
+                          Lucro: {profitPercent.toFixed(1)}%
                         </p>
                         <div className="mt-2">
                           <p className="text-sm text-muted-foreground">Sugestão de preço por CMV:</p>
@@ -592,33 +629,35 @@ export default function FichasTecnicas() {
                 />
               </div>
 
-              {/* Yield and Price */}
+              {/* Yield and Profit */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="yield">Rendimento (porções)</Label>
                   <Input
                     id="yield"
-                    type="number"
-                    min={0.1}
-                    step={0.1}
+                    type="text"
+                    inputMode="decimal"
                     value={formData.yield_quantity}
                     onChange={(e) =>
-                      setFormData({ ...formData, yield_quantity: parseFloat(e.target.value) || 1 })
+                      setFormData({ ...formData, yield_quantity: parseDecimal(e.target.value) || 1 })
                     }
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="sell_price">Preço de Venda por Porção (R$)</Label>
+                  <Label htmlFor="profit_percent">Lucro (%)</Label>
                   <Input
-                    id="sell_price"
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    value={formData.sell_price}
+                    id="profit_percent"
+                    type="text"
+                    inputMode="decimal"
+                    value={formData.profit_percent}
                     onChange={(e) =>
-                      setFormData({ ...formData, sell_price: parseFloat(e.target.value) || 0 })
+                      setFormData({ ...formData, profit_percent: parseDecimal(e.target.value) })
                     }
+                    placeholder="Ex: 10 para 10%"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Preço = Custo + {formData.profit_percent}%
+                  </p>
                 </div>
               </div>
 
@@ -656,17 +695,16 @@ export default function FichasTecnicas() {
                   <div className="w-24">
                     <Label className="text-xs text-muted-foreground">Qtd.</Label>
                     <Input
-                      type="number"
-                      min={0}
-                      step={0.001}
-                      value={currentIngredient.quantity || ""}
+                      type="text"
+                      inputMode="decimal"
+                      value={currentIngredient.quantity}
                       onChange={(e) =>
                         setCurrentIngredient({
                           ...currentIngredient,
-                          quantity: parseFloat(e.target.value) || 0,
+                          quantity: e.target.value,
                         })
                       }
-                      placeholder="0.05"
+                      placeholder="0,05"
                     />
                   </div>
                   <div className="w-20">
@@ -682,7 +720,7 @@ export default function FichasTecnicas() {
                   <div className="w-24">
                     <Label className="text-xs text-muted-foreground">Custo Est.</Label>
                     <div className="h-10 flex items-center text-sm">
-                      R$ {getIngredientCost(currentIngredient.product_id, currentIngredient.quantity).toFixed(2)}
+                      R$ {getIngredientCost(currentIngredient.product_id, parseDecimal(currentIngredient.quantity)).toFixed(2)}
                     </div>
                   </div>
                   <Button type="button" size="icon" onClick={handleAddIngredient}>
@@ -739,24 +777,20 @@ export default function FichasTecnicas() {
                   </div>
                 )}
 
-                {/* Profit calculation */}
-                {formData.sell_price > 0 && formData.ingredients.length > 0 && (
+                {/* Calculated values */}
+                {formData.ingredients.length > 0 && (
                   <div className="bg-muted/50 rounded-lg p-4 space-y-2">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Custo por Porção:</span>
                       <span>R$ {(getFormTotalCost() / formData.yield_quantity).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Preço de Venda:</span>
-                      <span>R$ {formData.sell_price.toFixed(2)}</span>
+                      <span className="text-muted-foreground">Lucro ({formData.profit_percent}%):</span>
+                      <span>R$ {((getFormTotalCost() / formData.yield_quantity) * (formData.profit_percent / 100)).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between font-bold text-green-600">
-                      <span>Lucro por Porção:</span>
-                      <span>
-                        R$ {(formData.sell_price - getFormTotalCost() / formData.yield_quantity).toFixed(2)}
-                        {" "}
-                        ({(((formData.sell_price - getFormTotalCost() / formData.yield_quantity) / formData.sell_price) * 100).toFixed(1)}%)
-                      </span>
+                    <div className="flex justify-between font-bold text-primary">
+                      <span>Preço de Venda por Porção:</span>
+                      <span>R$ {getFormSellPrice().toFixed(2)}</span>
                     </div>
                   </div>
                 )}
