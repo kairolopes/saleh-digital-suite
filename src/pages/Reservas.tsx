@@ -584,11 +584,16 @@ export default function Reservas() {
                                                   const { data, error } = await supabase.functions.invoke('send-reservation-reminder', {
                                                     body: { reservationId: reservation.id },
                                                   });
-                                                  if (error) throw error;
-                                                  if (data?.error) {
-                                                    toast.error(data.error === 'No webhook URL configured' 
-                                                      ? 'URL de webhook não configurada' 
-                                                      : data.error);
+                                                  // Handle both data.error and error responses
+                                                  const errorMessage = data?.error || (error as any)?.context?.json?.error;
+                                                  if (errorMessage) {
+                                                    if (errorMessage === 'No webhook URL configured') {
+                                                      toast.warning('URL de webhook não configurada. Configure em Configurações para enviar lembretes.');
+                                                    } else {
+                                                      toast.error(errorMessage);
+                                                    }
+                                                  } else if (error) {
+                                                    throw error;
                                                   } else {
                                                     toast.success('Lembrete enviado com sucesso!');
                                                     queryClient.invalidateQueries({ queryKey: ['reservations'] });
