@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -9,10 +8,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarDays, Clock, Users, Phone, User, Mail, MessageSquare, CheckCircle } from "lucide-react";
+import { CalendarDays, Clock, Users, Phone, User, Mail, MessageSquare, CheckCircle, AlertCircle } from "lucide-react";
 
 interface RestaurantSettings {
   id: string;
@@ -33,7 +33,6 @@ const timeSlots = [
 ];
 
 export default function ReservaPublica() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState("");
@@ -58,10 +57,56 @@ export default function ReservaPublica() {
     },
   });
 
+  // Query to check availability for selected date
+  const { data: existingReservations } = useQuery({
+    queryKey: ["check-availability", selectedDate ? format(selectedDate, "yyyy-MM-dd") : null],
+    queryFn: async () => {
+      if (!selectedDate) return [];
+      
+      const dateStr = format(selectedDate, "yyyy-MM-dd");
+      
+      const { data, error } = await supabase
+        .from("reservations")
+        .select("id, reservation_time, party_size, status")
+        .eq("reservation_date", dateStr)
+        .neq("status", "cancelled")
+        .neq("status", "completed");
+      
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!selectedDate,
+  });
+
+  // Check if a time slot is available
+  const isTimeSlotAvailable = (time: string) => {
+    if (!existingReservations) return true;
+    
+    const selectedMinutes = parseInt(time.split(":")[0]) * 60 + parseInt(time.split(":")[1]);
+    
+    for (const reservation of existingReservations) {
+      const reservationMinutes = parseInt(reservation.reservation_time.split(":")[0]) * 60 + 
+                                  parseInt(reservation.reservation_time.split(":")[1]);
+      
+      // Check if within 60 minutes of each other
+      if (Math.abs(selectedMinutes - reservationMinutes) < 60) {
+        return false;
+      }
+    }
+    
+    return true;
+  };
+
+  const currentTimeAvailable = selectedTime ? isTimeSlotAvailable(selectedTime) : true;
+
   const createReservation = useMutation({
     mutationFn: async () => {
       if (!selectedDate || !selectedTime || !customerName || !customerPhone) {
         throw new Error("Preencha todos os campos obrigatórios");
+      }
+
+      if (!currentTimeAvailable) {
+        throw new Error("Este horário não está disponível. Por favor, escolha outro horário.");
       }
 
       const maxTables = settings?.max_tables || 20;
@@ -99,6 +144,7 @@ export default function ReservaPublica() {
     onSuccess: () => {
       setIsSuccess(true);
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["check-availability"] });
     },
     onError: (error) => {
       toast.error(error.message || "Erro ao criar reserva");
@@ -122,6 +168,10 @@ export default function ReservaPublica() {
     }
     if (!customerPhone.trim()) {
       toast.error("Digite seu telefone");
+      return;
+    }
+    if (!currentTimeAvailable) {
+      toast.error("Este horário não está disponível");
       return;
     }
 
@@ -252,7 +302,10 @@ export default function ReservaPublica() {
                   <Calendar
                     mode="single"
                     selected={selectedDate}
-                    onSelect={setSelectedDate}
+                    onSelect={(date) => {
+                      setSelectedDate(date);
+                      setSelectedTime(""); // Reset time when date changes
+                    }}
                     locale={ptBR}
                     disabled={(date) => date < new Date() || date < new Date(new Date().setHours(0, 0, 0, 0))}
                     className="rounded-md border"
@@ -272,13 +325,29 @@ export default function ReservaPublica() {
                       <SelectValue placeholder="Selecione o horário" />
                     </SelectTrigger>
                     <SelectContent>
-                      {timeSlots.map((time) => (
-                        <SelectItem key={time} value={time}>
-                          {time}
-                        </SelectItem>
-                      ))}
+                      {timeSlots.map((time) => {
+                        const available = isTimeSlotAvailable(time);
+                        return (
+                          <SelectItem 
+                            key={time} 
+                            value={time}
+                            disabled={!available}
+                            className={!available ? "text-muted-foreground line-through" : ""}
+                          >
+                            {time} {!available && "(indisponível)"}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
+                  {selectedTime && !currentTimeAvailable && (
+                    <Alert variant="destructive" className="mt-2">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        Este horário não está disponível. Por favor, escolha outro.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -369,7 +438,7 @@ export default function ReservaPublica() {
                 type="submit" 
                 className="w-full h-12 text-lg"
                 style={{ backgroundColor: primaryColor }}
-                disabled={createReservation.isPending}
+                disabled={createReservation.isPending || !currentTimeAvailable}
               >
                 {createReservation.isPending ? "Enviando..." : "Solicitar Reserva"}
               </Button>
