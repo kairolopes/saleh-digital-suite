@@ -318,14 +318,21 @@ export type Database = {
       }
       orders: {
         Row: {
+          confirmed_at: string | null
           created_at: string | null
           customer_name: string | null
           customer_phone: string | null
+          delivered_at: string | null
           discount: number | null
           id: string
           notes: string | null
           order_number: number
           order_type: string
+          paid_at: string | null
+          payment_method: string | null
+          preparing_at: string | null
+          ready_at: string | null
+          rejection_reason: string | null
           status: string
           subtotal: number | null
           table_number: string | null
@@ -334,14 +341,21 @@ export type Database = {
           waiter_id: string | null
         }
         Insert: {
+          confirmed_at?: string | null
           created_at?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          delivered_at?: string | null
           discount?: number | null
           id?: string
           notes?: string | null
           order_number?: number
           order_type?: string
+          paid_at?: string | null
+          payment_method?: string | null
+          preparing_at?: string | null
+          ready_at?: string | null
+          rejection_reason?: string | null
           status?: string
           subtotal?: number | null
           table_number?: string | null
@@ -350,14 +364,21 @@ export type Database = {
           waiter_id?: string | null
         }
         Update: {
+          confirmed_at?: string | null
           created_at?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          delivered_at?: string | null
           discount?: number | null
           id?: string
           notes?: string | null
           order_number?: number
           order_type?: string
+          paid_at?: string | null
+          payment_method?: string | null
+          preparing_at?: string | null
+          ready_at?: string | null
+          rejection_reason?: string | null
           status?: string
           subtotal?: number | null
           table_number?: string | null
