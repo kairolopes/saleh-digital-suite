@@ -47,6 +47,102 @@ export type Database = {
         }
         Relationships: []
       }
+      complaints: {
+        Row: {
+          created_at: string | null
+          customer_name: string | null
+          customer_phone: string | null
+          id: string
+          message: string
+          order_id: string | null
+          order_number: number | null
+          responded_at: string | null
+          responded_by: string | null
+          response: string | null
+          status: string | null
+          table_number: string | null
+          type: string
+          urgency: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          message: string
+          order_id?: string | null
+          order_number?: number | null
+          responded_at?: string | null
+          responded_by?: string | null
+          response?: string | null
+          status?: string | null
+          table_number?: string | null
+          type?: string
+          urgency?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          message?: string
+          order_id?: string | null
+          order_number?: number | null
+          responded_at?: string | null
+          responded_by?: string | null
+          response?: string | null
+          status?: string | null
+          table_number?: string | null
+          type?: string
+          urgency?: string | null
+        }
+        Relationships: []
+      }
+      customer_questions: {
+        Row: {
+          answer: string | null
+          answered_at: string | null
+          answered_by: string | null
+          category: string | null
+          created_at: string | null
+          customer_name: string | null
+          customer_phone: string | null
+          id: string
+          order_id: string | null
+          question: string
+          status: string | null
+          table_number: string | null
+        }
+        Insert: {
+          answer?: string | null
+          answered_at?: string | null
+          answered_by?: string | null
+          category?: string | null
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          order_id?: string | null
+          question: string
+          status?: string | null
+          table_number?: string | null
+        }
+        Update: {
+          answer?: string | null
+          answered_at?: string | null
+          answered_by?: string | null
+          category?: string | null
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          order_id?: string | null
+          question?: string
+          status?: string | null
+          table_number?: string | null
+        }
+        Relationships: []
+      }
       financial_entries: {
         Row: {
           amount: number
@@ -126,6 +222,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      notifications: {
+        Row: {
+          created_at: string | null
+          data: Json | null
+          id: string
+          is_read: boolean | null
+          message: string | null
+          priority: string | null
+          read_at: string | null
+          target_roles: string[] | null
+          target_user_id: string | null
+          title: string
+          type: string
+        }
+        Insert: {
+          created_at?: string | null
+          data?: Json | null
+          id?: string
+          is_read?: boolean | null
+          message?: string | null
+          priority?: string | null
+          read_at?: string | null
+          target_roles?: string[] | null
+          target_user_id?: string | null
+          title: string
+          type: string
+        }
+        Update: {
+          created_at?: string | null
+          data?: Json | null
+          id?: string
+          is_read?: boolean | null
+          message?: string | null
+          priority?: string | null
+          read_at?: string | null
+          target_roles?: string[] | null
+          target_user_id?: string | null
+          title?: string
+          type?: string
+        }
+        Relationships: []
       }
       order_items: {
         Row: {
@@ -360,6 +498,48 @@ export type Database = {
           },
         ]
       }
+      ratings: {
+        Row: {
+          ambiance_rating: number | null
+          comment: string | null
+          created_at: string | null
+          customer_name: string | null
+          customer_phone: string | null
+          food_rating: number | null
+          id: string
+          order_id: string | null
+          order_number: number | null
+          overall_rating: number
+          service_rating: number | null
+        }
+        Insert: {
+          ambiance_rating?: number | null
+          comment?: string | null
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          food_rating?: number | null
+          id?: string
+          order_id?: string | null
+          order_number?: number | null
+          overall_rating: number
+          service_rating?: number | null
+        }
+        Update: {
+          ambiance_rating?: number | null
+          comment?: string | null
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          food_rating?: number | null
+          id?: string
+          order_id?: string | null
+          order_number?: number | null
+          overall_rating?: number
+          service_rating?: number | null
+        }
+        Relationships: []
+      }
       recipe_items: {
         Row: {
           created_at: string | null
@@ -500,6 +680,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      suggestions: {
+        Row: {
+          created_at: string | null
+          customer_name: string | null
+          customer_phone: string | null
+          id: string
+          message: string
+          responded_at: string | null
+          responded_by: string | null
+          response: string | null
+          status: string | null
+          table_number: string | null
+          type: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          message: string
+          responded_at?: string | null
+          responded_by?: string | null
+          response?: string | null
+          status?: string | null
+          table_number?: string | null
+          type?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          message?: string
+          responded_at?: string | null
+          responded_by?: string | null
+          response?: string | null
+          status?: string | null
+          table_number?: string | null
+          type?: string | null
+        }
+        Relationships: []
       }
       suppliers: {
         Row: {
