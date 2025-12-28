@@ -25,7 +25,8 @@ import {
   ArrowRight,
   ArrowLeft,
   MessageSquare,
-  HandPlatter
+  HandPlatter,
+  Eye
 } from "lucide-react";
 import {
   Dialog,
@@ -35,6 +36,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { OrderTracking } from "@/components/OrderTracking";
 
 interface CartItem {
   menuItemId: string;
@@ -68,7 +70,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   acompanhamento: "Acompanhamentos",
 };
 
-type Step = "register" | "menu" | "cart" | "success";
+type Step = "register" | "menu" | "cart" | "success" | "tracking";
 
 export default function Cliente() {
   const [searchParams] = useSearchParams();
@@ -78,6 +80,7 @@ export default function Cliente() {
   const [step, setStep] = useState<Step>("register");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orderNumber, setOrderNumber] = useState<number | null>(null);
+  const [orderId, setOrderId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
@@ -173,7 +176,8 @@ export default function Cliente() {
     },
     onSuccess: (order) => {
       setOrderNumber(order.order_number);
-      setStep("success");
+      setOrderId(order.id);
+      setStep("tracking");
       setCart([]);
       queryClient.invalidateQueries({ queryKey: ["orders"] });
     },
@@ -389,7 +393,25 @@ export default function Cliente() {
     );
   }
 
-  // Step: Success
+  // Step: Tracking
+  if (step === "tracking" && orderNumber) {
+    return (
+      <OrderTracking
+        orderNumber={orderNumber}
+        customerName={customerName}
+        tableNumber={tableNumber}
+        onNewOrder={() => {
+          setStep("menu");
+          setOrderNumber(null);
+          setOrderId(null);
+          setOrderNotes("");
+        }}
+        onBack={() => setStep("menu")}
+      />
+    );
+  }
+
+  // Step: Success (fallback)
   if (step === "success") {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -413,19 +435,26 @@ export default function Cliente() {
                 Mesa: <span className="font-semibold">{tableNumber}</span>
               </p>
             )}
-            <p className="text-sm text-muted-foreground">
-              Você receberá notificações sobre o status do seu pedido.
-            </p>
-            <Button
-              className="w-full"
-              onClick={() => {
-                setStep("menu");
-                setOrderNumber(null);
-                setOrderNotes("");
-              }}
-            >
-              Fazer Novo Pedido
-            </Button>
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full"
+                onClick={() => setStep("tracking")}
+              >
+                <Eye className="w-4 h-4 mr-2" />
+                Acompanhar Pedido
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setStep("menu");
+                  setOrderNumber(null);
+                  setOrderNotes("");
+                }}
+              >
+                Fazer Novo Pedido
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
