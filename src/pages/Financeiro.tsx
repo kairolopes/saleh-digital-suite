@@ -51,7 +51,7 @@ const categoryLabels: Record<string, string> = {
 export default function Financeiro() {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [entryType, setEntryType] = useState<'entrada' | 'saida'>('entrada');
+  const [entryType, setEntryType] = useState<'receita' | 'despesa'>('receita');
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [filterCategory, setFilterCategory] = useState<string>('all');
 
@@ -95,8 +95,8 @@ export default function Financeiro() {
 
       if (error) throw error;
 
-      const income = data?.filter(e => e.entry_type === 'entrada').reduce((acc, e) => acc + e.amount, 0) || 0;
-      const expenses = data?.filter(e => e.entry_type === 'saida').reduce((acc, e) => acc + e.amount, 0) || 0;
+      const income = data?.filter(e => e.entry_type === 'receita').reduce((acc, e) => acc + e.amount, 0) || 0;
+      const expenses = data?.filter(e => e.entry_type === 'despesa').reduce((acc, e) => acc + e.amount, 0) || 0;
       const balance = income - expenses;
 
       return { income, expenses, balance };
@@ -121,8 +121,8 @@ export default function Financeiro() {
 
         if (error) throw error;
 
-        const dayIncome = data?.filter(e => e.entry_type === 'entrada').reduce((acc, e) => acc + e.amount, 0) || 0;
-        const dayExpenses = data?.filter(e => e.entry_type === 'saida').reduce((acc, e) => acc + e.amount, 0) || 0;
+        const dayIncome = data?.filter(e => e.entry_type === 'receita').reduce((acc, e) => acc + e.amount, 0) || 0;
+        const dayExpenses = data?.filter(e => e.entry_type === 'despesa').reduce((acc, e) => acc + e.amount, 0) || 0;
         runningBalance += dayIncome - dayExpenses;
 
         days.push({
@@ -153,7 +153,7 @@ export default function Financeiro() {
       const expensesByCategory: Record<string, number> = {};
 
       data?.forEach(entry => {
-        if (entry.entry_type === 'entrada') {
+        if (entry.entry_type === 'receita') {
           incomeByCategory[entry.category] = (incomeByCategory[entry.category] || 0) + entry.amount;
         } else {
           expensesByCategory[entry.category] = (expensesByCategory[entry.category] || 0) + entry.amount;
@@ -181,7 +181,7 @@ export default function Financeiro() {
       queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
       queryClient.invalidateQueries({ queryKey: ['cash-flow'] });
       queryClient.invalidateQueries({ queryKey: ['category-breakdown'] });
-      toast.success(`${entryType === 'entrada' ? 'Entrada' : 'Saída'} registrada com sucesso!`);
+      toast.success(`${entryType === 'receita' ? 'Receita' : 'Despesa'} registrada com sucesso!`);
       setIsDialogOpen(false);
       setNewEntry({ amount: '', category: '', description: '', entry_date: format(new Date(), 'yyyy-MM-dd') });
     },
@@ -217,13 +217,13 @@ export default function Financeiro() {
           <div className="flex gap-2">
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <DialogTrigger asChild>
-                <Button onClick={() => setEntryType('entrada')} className="bg-success hover:bg-success/90">
+                <Button onClick={() => setEntryType('receita')} className="bg-success hover:bg-success/90">
                   <ArrowUpCircle className="h-4 w-4 mr-2" />
                   Nova Entrada
                 </Button>
               </DialogTrigger>
               <DialogTrigger asChild>
-                <Button onClick={() => setEntryType('saida')} variant="destructive">
+                <Button onClick={() => setEntryType('despesa')} variant="destructive">
                   <ArrowDownCircle className="h-4 w-4 mr-2" />
                   Nova Saída
                 </Button>
@@ -231,7 +231,7 @@ export default function Financeiro() {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>
-                    {entryType === 'entrada' ? 'Registrar Entrada' : 'Registrar Saída'}
+                    {entryType === 'receita' ? 'Registrar Receita' : 'Registrar Despesa'}
                   </DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 mt-4">
@@ -255,7 +255,7 @@ export default function Financeiro() {
                         <SelectValue placeholder="Selecione a categoria" />
                       </SelectTrigger>
                       <SelectContent>
-                        {(entryType === 'entrada' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(cat => (
+                        {(entryType === 'receita' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(cat => (
                           <SelectItem key={cat} value={cat}>
                             {categoryLabels[cat]}
                           </SelectItem>
