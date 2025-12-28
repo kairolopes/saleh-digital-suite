@@ -21,6 +21,7 @@ import Usuarios from "./pages/Usuarios";
 import Relatorios from "./pages/Relatorios";
 import Configuracoes from "./pages/Configuracoes";
 import Reservas from "./pages/Reservas";
+import ReservaPublica from "./pages/ReservaPublica";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,7 @@ const App = () => (
             <Route path="/relatorios" element={<Relatorios />} />
             <Route path="/configuracoes" element={<Configuracoes />} />
             <Route path="/reservas" element={<Reservas />} />
+            <Route path="/reservar" element={<ReservaPublica />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
