@@ -172,14 +172,14 @@ export default function Garcom() {
     },
   });
 
-  // Fetch waiter calls
+  // Fetch waiter calls and bill requests
   const { data: waiterCallsData } = useQuery({
     queryKey: ["waiter-calls"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("notifications")
         .select("*")
-        .eq("type", "call_waiter")
+        .in("type", ["call_waiter", "request_bill"])
         .eq("is_read", false)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -232,6 +232,19 @@ export default function Garcom() {
           toast.warning(`Mesa ${notification.data?.table_number || "?"} chamando!`, {
             description: notification.data?.customer_name || "Cliente precisa de atendimento",
             duration: 10000,
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: "type=eq.request_bill" },
+        (payload) => {
+          playSound();
+          queryClient.invalidateQueries({ queryKey: ["waiter-calls"] });
+          const notification = payload.new as any;
+          toast.warning(`Mesa ${notification.data?.table_number || "?"} pediu a CONTA!`, {
+            description: `${notification.data?.customer_name || "Cliente"} - ${notification.data?.payment_method || ""}`,
+            duration: 15000,
           });
         }
       )
@@ -522,48 +535,70 @@ export default function Garcom() {
           </div>
         </div>
 
-        {/* Waiter Calls Section */}
+        {/* Waiter Calls & Bill Requests Section */}
         {waiterCallsData && waiterCallsData.length > 0 && (
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-4">
               <Bell className="h-6 w-6 text-red-600 animate-bounce" />
-              <h2 className="text-xl font-bold text-red-700">Chamados de Mesa</h2>
+              <h2 className="text-xl font-bold text-red-700">Chamados e Solicitações</h2>
             </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {waiterCallsData.map((call: any) => (
-                <Card
-                  key={call.id}
-                  className="border-2 border-red-500 bg-red-50 dark:bg-red-950/30 shadow-lg shadow-red-500/20 animate-pulse"
-                >
-                  <CardContent className="p-6">
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <MapPin className="h-6 w-6 text-red-700" />
-                          <span className="text-3xl font-black text-red-700">
-                            Mesa {call.data?.table_number || "?"}
-                          </span>
+              {waiterCallsData.map((call: any) => {
+                const isBillRequest = call.type === "request_bill";
+                return (
+                  <Card
+                    key={call.id}
+                    className={`border-2 shadow-lg animate-pulse ${
+                      isBillRequest 
+                        ? "border-orange-500 bg-orange-50 dark:bg-orange-950/30 shadow-orange-500/20"
+                        : "border-red-500 bg-red-50 dark:bg-red-950/30 shadow-red-500/20"
+                    }`}
+                  >
+                    <CardContent className="p-6">
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <MapPin className={`h-6 w-6 ${isBillRequest ? "text-orange-700" : "text-red-700"}`} />
+                            <span className={`text-3xl font-black ${isBillRequest ? "text-orange-700" : "text-red-700"}`}>
+                              Mesa {call.data?.table_number || "?"}
+                            </span>
+                          </div>
+                          {call.data?.customer_name && (
+                            <p className={`flex items-center gap-1 mt-2 ${isBillRequest ? "text-orange-700" : "text-red-700"}`}>
+                              <User className="h-4 w-4" />
+                              {call.data.customer_name}
+                            </p>
+                          )}
+                          {isBillRequest && call.data?.payment_method && (
+                            <p className="text-orange-600 flex items-center gap-1 mt-1 font-semibold">
+                              <CreditCard className="h-4 w-4" />
+                              {call.data.payment_method === "pix" ? "PIX" :
+                               call.data.payment_method === "credit" ? "Cartão Crédito" :
+                               call.data.payment_method === "debit" ? "Cartão Débito" :
+                               call.data.payment_method === "cash" ? "Dinheiro" : call.data.payment_method}
+                            </p>
+                          )}
                         </div>
-                        {call.data?.customer_name && (
-                          <p className="text-red-700 flex items-center gap-1 mt-2">
-                            <User className="h-4 w-4" />
-                            {call.data.customer_name}
-                          </p>
-                        )}
+                        <Badge className={`text-white text-lg px-4 py-1 ${isBillRequest ? "bg-orange-600" : "bg-red-600"}`}>
+                          {isBillRequest ? "CONTA" : "CHAMANDO"}
+                        </Badge>
                       </div>
-                      <Badge className="bg-red-600 text-white text-lg px-4 py-1">CHAMANDO</Badge>
-                    </div>
-                    <Button
-                      className="w-full h-14 text-lg font-bold bg-red-600 hover:bg-red-700"
-                      onClick={() => dismissCall.mutate(call.id)}
-                      disabled={dismissCall.isPending}
-                    >
-                      <CheckCircle className="h-6 w-6 mr-2" />
-                      Atender Mesa
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
+                      <Button
+                        className={`w-full h-14 text-lg font-bold ${
+                          isBillRequest 
+                            ? "bg-orange-600 hover:bg-orange-700" 
+                            : "bg-red-600 hover:bg-red-700"
+                        }`}
+                        onClick={() => dismissCall.mutate(call.id)}
+                        disabled={dismissCall.isPending}
+                      >
+                        <CheckCircle className="h-6 w-6 mr-2" />
+                        {isBillRequest ? "Levar Conta" : "Atender Mesa"}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           </div>
         )}
