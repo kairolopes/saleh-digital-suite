@@ -26,7 +26,8 @@ import {
   ArrowLeft,
   MessageSquare,
   HandPlatter,
-  Eye
+  Eye,
+  Pencil
 } from "lucide-react";
 import {
   Dialog,
@@ -62,14 +63,6 @@ interface MenuItem {
   } | null;
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  entrada: "Entradas",
-  prato_principal: "Pratos Principais",
-  sobremesa: "Sobremesas",
-  bebida: "Bebidas",
-  acompanhamento: "Acompanhamentos",
-};
-
 type Step = "register" | "menu" | "cart" | "success" | "tracking";
 
 export default function Cliente() {
@@ -89,6 +82,7 @@ export default function Cliente() {
   const [itemQuantity, setItemQuantity] = useState(1);
   const [itemNotes, setItemNotes] = useState("");
   const [callingWaiter, setCallingWaiter] = useState(false);
+  const [editingCartItem, setEditingCartItem] = useState<string | null>(null);
 
   // Check if user already registered (localStorage)
   useEffect(() => {
@@ -101,7 +95,21 @@ export default function Cliente() {
     }
   }, [tableNumber]);
 
-  // Fetch menu items
+  // Fetch restaurant settings
+  const { data: settings } = useQuery({
+    queryKey: ["restaurant-settings-client"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("restaurant_settings")
+        .select("name, logo_url, primary_color")
+        .limit(1)
+        .single();
+      if (error) return null;
+      return data;
+    },
+  });
+
+  // Fetch menu items with recipes
   const { data: menuItems = [], isLoading } = useQuery({
     queryKey: ["client-menu"],
     queryFn: async () => {
@@ -112,7 +120,8 @@ export default function Cliente() {
           sell_price,
           category,
           is_available,
-          recipes:recipe_id (
+          display_order,
+          recipes (
             id,
             name,
             description,
@@ -211,7 +220,7 @@ export default function Cliente() {
     onSuccess: () => {
       setCallingWaiter(true);
       toast.success("Garçom chamado! Aguarde um momento.");
-      setTimeout(() => setCallingWaiter(false), 30000); // Reset after 30s
+      setTimeout(() => setCallingWaiter(false), 30000);
     },
     onError: () => {
       toast.error("Erro ao chamar garçom. Tente novamente.");
@@ -242,7 +251,6 @@ export default function Cliente() {
       return;
     }
     
-    // Save to localStorage
     localStorage.setItem(`customer_name_${tableNumber}`, customerName);
     localStorage.setItem(`customer_phone_${tableNumber}`, customerPhone);
     
@@ -251,8 +259,14 @@ export default function Cliente() {
 
   const openItemDialog = (item: MenuItem) => {
     setSelectedItem(item);
-    setItemQuantity(1);
-    setItemNotes("");
+    const existingItem = cart.find((c) => c.menuItemId === item.id);
+    if (existingItem) {
+      setItemQuantity(existingItem.quantity);
+      setItemNotes(existingItem.notes);
+    } else {
+      setItemQuantity(1);
+      setItemNotes("");
+    }
   };
 
   const addToCartFromDialog = () => {
@@ -264,10 +278,11 @@ export default function Cliente() {
       setCart((prev) =>
         prev.map((c, i) =>
           i === existingIndex
-            ? { ...c, quantity: c.quantity + itemQuantity, notes: itemNotes || c.notes }
+            ? { ...c, quantity: itemQuantity, notes: itemNotes }
             : c
         )
       );
+      toast.success(`${selectedItem.recipes.name} atualizado no carrinho`);
     } else {
       setCart((prev) => [
         ...prev,
@@ -281,9 +296,8 @@ export default function Cliente() {
           description: selectedItem.recipes.description || undefined,
         },
       ]);
+      toast.success(`${selectedItem.recipes.name} adicionado ao carrinho`);
     }
-    
-    toast.success(`${selectedItem.recipes.name} adicionado ao carrinho`);
     setSelectedItem(null);
   };
 
@@ -311,6 +325,11 @@ export default function Cliente() {
     setCart((prev) => prev.filter((item) => item.menuItemId !== menuItemId));
   };
 
+  const getCartItemQuantity = (menuItemId: string) => {
+    const item = cart.find((c) => c.menuItemId === menuItemId);
+    return item?.quantity || 0;
+  };
+
   const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -332,12 +351,16 @@ export default function Cliente() {
   if (step === "register") {
     return (
       <div className="min-h-screen bg-gradient-to-br from-primary/10 to-background flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md shadow-xl">
           <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-              <UtensilsCrossed className="w-8 h-8 text-primary" />
-            </div>
-            <CardTitle className="text-2xl">Bem-vindo!</CardTitle>
+            {settings?.logo_url ? (
+              <img src={settings.logo_url} alt={settings.name} className="mx-auto h-20 w-20 object-contain mb-4" />
+            ) : (
+              <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                <UtensilsCrossed className="w-8 h-8 text-primary" />
+              </div>
+            )}
+            <CardTitle className="text-2xl">{settings?.name || "Bem-vindo!"}</CardTitle>
             {tableNumber && (
               <Badge variant="outline" className="mx-auto mt-2">
                 Mesa {tableNumber}
@@ -492,19 +515,28 @@ export default function Cliente() {
           ) : (
             <div className="space-y-4">
               {cart.map((item) => (
-                <Card key={item.menuItemId}>
-                  <CardContent className="p-4">
-                    <div className="flex gap-4">
-                      {item.imageUrl && (
+                <Card key={item.menuItemId} className="overflow-hidden">
+                  <CardContent className="p-0">
+                    <div className="flex">
+                      {item.imageUrl ? (
                         <img
                           src={item.imageUrl}
                           alt={item.name}
-                          className="w-20 h-20 rounded-lg object-cover"
+                          className="w-24 h-24 object-cover"
                         />
+                      ) : (
+                        <div className="w-24 h-24 bg-muted flex items-center justify-center">
+                          <UtensilsCrossed className="w-8 h-8 text-muted-foreground" />
+                        </div>
                       )}
-                      <div className="flex-1">
+                      <div className="flex-1 p-3">
                         <div className="flex justify-between items-start">
-                          <h3 className="font-semibold">{item.name}</h3>
+                          <div>
+                            <h3 className="font-semibold">{item.name}</h3>
+                            <p className="text-primary font-bold">
+                              {formatCurrency(item.price * item.quantity)}
+                            </p>
+                          </div>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -514,38 +546,54 @@ export default function Cliente() {
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
-                        <p className="text-primary font-semibold mt-1">
-                          {formatCurrency(item.price * item.quantity)}
-                        </p>
                         
-                        <div className="flex items-center gap-3 mt-3">
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => updateQuantity(item.menuItemId, -1)}
+                            >
+                              <Minus className="w-4 h-4" />
+                            </Button>
+                            <span className="font-medium w-8 text-center">{item.quantity}</span>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => updateQuantity(item.menuItemId, 1)}
+                            >
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                          </div>
                           <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => updateQuantity(item.menuItemId, -1)}
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs"
+                            onClick={() => setEditingCartItem(editingCartItem === item.menuItemId ? null : item.menuItemId)}
                           >
-                            <Minus className="w-4 h-4" />
-                          </Button>
-                          <span className="font-medium w-8 text-center">{item.quantity}</span>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => updateQuantity(item.menuItemId, 1)}
-                          >
-                            <Plus className="w-4 h-4" />
+                            <Pencil className="w-3 h-3 mr-1" />
+                            {item.notes ? "Editar obs." : "Adicionar obs."}
                           </Button>
                         </div>
 
-                        <div className="mt-3">
-                          <Input
-                            placeholder="Observações (ex: sem cebola)"
-                            value={item.notes}
-                            onChange={(e) => updateItemNotes(item.menuItemId, e.target.value)}
-                            className="text-sm"
-                          />
-                        </div>
+                        {editingCartItem === item.menuItemId && (
+                          <div className="mt-2">
+                            <Input
+                              placeholder="Ex: sem cebola, bem passado..."
+                              value={item.notes}
+                              onChange={(e) => updateItemNotes(item.menuItemId, e.target.value)}
+                              className="text-sm"
+                            />
+                          </div>
+                        )}
+
+                        {item.notes && editingCartItem !== item.menuItemId && (
+                          <p className="text-xs text-muted-foreground mt-2 italic">
+                            "{item.notes}"
+                          </p>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -569,7 +617,7 @@ export default function Cliente() {
 
         {/* Fixed Bottom */}
         {cart.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4">
+          <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4 shadow-lg">
             <div className="container max-w-2xl mx-auto">
               <div className="flex justify-between items-center mb-4">
                 <span className="text-lg font-semibold">Total</span>
@@ -600,20 +648,23 @@ export default function Cliente() {
   return (
     <div className="min-h-screen bg-background pb-24">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-background border-b">
+      <header className="sticky top-0 z-40 bg-background border-b shadow-sm">
         <div className="container max-w-2xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <UtensilsCrossed className="w-6 h-6 text-primary" />
+            <div className="flex items-center gap-3">
+              {settings?.logo_url ? (
+                <img src={settings.logo_url} alt={settings.name} className="h-10 w-10 object-contain rounded" />
+              ) : (
+                <UtensilsCrossed className="w-6 h-6 text-primary" />
+              )}
               <div>
-                <h1 className="font-bold text-lg">Cardápio</h1>
+                <h1 className="font-bold text-lg">{settings?.name || "Cardápio"}</h1>
                 <p className="text-xs text-muted-foreground">
                   {customerName} {tableNumber && `• Mesa ${tableNumber}`}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Call Waiter Button */}
               <Button
                 variant={callingWaiter ? "secondary" : "outline"}
                 size="sm"
@@ -624,17 +675,6 @@ export default function Cliente() {
                 <HandPlatter className="w-4 h-4 mr-1" />
                 {callingWaiter ? "Chamando..." : "Garçom"}
               </Button>
-              {cartCount > 0 && (
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="relative"
-                  onClick={() => setStep("cart")}
-                >
-                  <ShoppingCart className="w-5 h-5 mr-2" />
-                  {cartCount}
-                </Button>
-              )}
             </div>
           </div>
         </div>
@@ -659,7 +699,7 @@ export default function Cliente() {
                 onClick={() => setSelectedCategory(cat)}
                 className="whitespace-nowrap"
               >
-                {CATEGORY_LABELS[cat] || cat}
+                {cat}
               </Button>
             ))}
           </div>
@@ -672,58 +712,82 @@ export default function Cliente() {
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
           </div>
+        ) : menuItems.length === 0 ? (
+          <div className="text-center py-12">
+            <UtensilsCrossed className="mx-auto h-12 w-12 text-muted-foreground/50" />
+            <p className="mt-4 text-muted-foreground">
+              Nenhum item disponível no cardápio no momento.
+            </p>
+          </div>
         ) : (
           <div className="space-y-8">
             {(selectedCategory ? [selectedCategory] : categories).map((category) => (
               <section key={category}>
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                  {CATEGORY_LABELS[category] || category}
+                <h2 className="text-xl font-bold mb-4 text-foreground">
+                  {category}
                 </h2>
-                <div className="grid gap-4">
-                  {menuByCategory[category]?.map((item) => (
-                    <Card
-                      key={item.id}
-                      className="overflow-hidden hover:shadow-lg transition-all cursor-pointer"
-                      onClick={() => openItemDialog(item)}
-                    >
-                      <div className="flex">
-                        {item.recipes?.image_url ? (
-                          <div className="w-28 h-28 flex-shrink-0">
-                            <img
-                              src={item.recipes.image_url}
-                              alt={item.recipes.name}
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                        ) : (
-                          <div className="w-28 h-28 flex-shrink-0 bg-muted flex items-center justify-center">
-                            <UtensilsCrossed className="w-8 h-8 text-muted-foreground" />
-                          </div>
-                        )}
-                        <CardContent className="flex-1 p-4 flex flex-col justify-between">
-                          <div>
-                            <h3 className="font-semibold">{item.recipes?.name}</h3>
-                            {item.recipes?.description && (
-                              <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
-                                {item.recipes.description}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between mt-2">
-                            <span className="text-lg font-bold text-primary">
-                              {formatCurrency(item.sell_price)}
-                            </span>
-                            {item.recipes?.preparation_time && (
-                              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {item.recipes.preparation_time}min
+                <div className="grid gap-3">
+                  {menuByCategory[category]?.map((item) => {
+                    const quantityInCart = getCartItemQuantity(item.id);
+                    return (
+                      <Card
+                        key={item.id}
+                        className={`overflow-hidden transition-all cursor-pointer hover:shadow-md ${
+                          quantityInCart > 0 ? "ring-2 ring-primary" : ""
+                        }`}
+                        onClick={() => openItemDialog(item)}
+                      >
+                        <div className="flex">
+                          {item.recipes?.image_url ? (
+                            <div className="w-28 h-28 flex-shrink-0 relative">
+                              <img
+                                src={item.recipes.image_url}
+                                alt={item.recipes.name || "Item"}
+                                className="w-full h-full object-cover"
+                              />
+                              {quantityInCart > 0 && (
+                                <div className="absolute top-1 right-1 bg-primary text-primary-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
+                                  {quantityInCart}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="w-28 h-28 flex-shrink-0 bg-muted flex items-center justify-center relative">
+                              <UtensilsCrossed className="w-8 h-8 text-muted-foreground" />
+                              {quantityInCart > 0 && (
+                                <div className="absolute top-1 right-1 bg-primary text-primary-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
+                                  {quantityInCart}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <CardContent className="flex-1 p-4 flex flex-col justify-between">
+                            <div>
+                              <h3 className="font-semibold text-foreground">
+                                {item.recipes?.name || "Item sem nome"}
+                              </h3>
+                              {item.recipes?.description && (
+                                <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
+                                  {item.recipes.description}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between mt-2">
+                              <span className="text-lg font-bold text-primary">
+                                {formatCurrency(item.sell_price)}
                               </span>
-                            )}
-                          </div>
-                        </CardContent>
-                      </div>
-                    </Card>
-                  ))}
+                              {item.recipes?.preparation_time && (
+                                <Badge variant="secondary" className="flex items-center gap-1 text-xs">
+                                  <Clock className="w-3 h-3" />
+                                  {item.recipes.preparation_time}min
+                                </Badge>
+                              )}
+                            </div>
+                          </CardContent>
+                        </div>
+                      </Card>
+                    );
+                  })}
                 </div>
               </section>
             ))}
@@ -735,12 +799,14 @@ export default function Cliente() {
       {cartCount > 0 && (
         <div className="fixed bottom-4 left-4 right-4 z-50">
           <Button
-            className="w-full max-w-2xl mx-auto flex items-center justify-between py-6 shadow-lg"
+            className="w-full max-w-2xl mx-auto flex items-center justify-between py-6 shadow-xl"
             onClick={() => setStep("cart")}
           >
             <div className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5" />
-              <span>{cartCount} {cartCount === 1 ? "item" : "itens"}</span>
+              <div className="bg-primary-foreground/20 rounded-full px-3 py-1">
+                <span className="font-bold">{cartCount}</span>
+              </div>
+              <span>Ver Carrinho</span>
             </div>
             <span className="font-bold text-lg">{formatCurrency(cartTotal)}</span>
           </Button>
@@ -749,36 +815,41 @@ export default function Cliente() {
 
       {/* Item Detail Dialog */}
       <Dialog open={!!selectedItem} onOpenChange={(open) => !open && setSelectedItem(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md p-0 overflow-hidden">
           {selectedItem?.recipes && (
             <>
-              {selectedItem.recipes.image_url && (
-                <div className="-mx-6 -mt-6 mb-4">
+              {selectedItem.recipes.image_url ? (
+                <div className="relative">
                   <img
                     src={selectedItem.recipes.image_url}
                     alt={selectedItem.recipes.name}
-                    className="w-full h-48 object-cover rounded-t-lg"
+                    className="w-full h-56 object-cover"
                   />
-                </div>
-              )}
-              <DialogHeader>
-                <DialogTitle className="text-xl">{selectedItem.recipes.name}</DialogTitle>
-                <DialogDescription className="text-base">
-                  {selectedItem.recipes.description}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4 py-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-2xl font-bold text-primary">
-                    {formatCurrency(selectedItem.sell_price)}
-                  </span>
                   {selectedItem.recipes.preparation_time && (
-                    <Badge variant="secondary" className="flex items-center gap-1">
+                    <Badge className="absolute bottom-3 left-3 flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {selectedItem.recipes.preparation_time} min
                     </Badge>
                   )}
+                </div>
+              ) : (
+                <div className="w-full h-32 bg-muted flex items-center justify-center">
+                  <UtensilsCrossed className="w-12 h-12 text-muted-foreground" />
+                </div>
+              )}
+              
+              <div className="p-6 space-y-4">
+                <DialogHeader>
+                  <DialogTitle className="text-2xl">{selectedItem.recipes.name}</DialogTitle>
+                  {selectedItem.recipes.description && (
+                    <DialogDescription className="text-base text-muted-foreground">
+                      {selectedItem.recipes.description}
+                    </DialogDescription>
+                  )}
+                </DialogHeader>
+
+                <div className="text-3xl font-bold text-primary">
+                  {formatCurrency(selectedItem.sell_price)}
                 </div>
 
                 <div className="space-y-2">
@@ -787,40 +858,42 @@ export default function Cliente() {
                     Observações
                   </Label>
                   <Textarea
-                    placeholder="Ex: sem cebola, bem passado, etc."
+                    placeholder="Ex: sem cebola, bem passado, ponto da carne..."
                     value={itemNotes}
                     onChange={(e) => setItemNotes(e.target.value)}
                     rows={2}
+                    className="resize-none"
                   />
                 </div>
 
-                <div className="flex items-center justify-center gap-4">
+                <div className="flex items-center justify-center gap-6 py-2">
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-12 w-12"
+                    className="h-14 w-14 rounded-full"
                     onClick={() => setItemQuantity(Math.max(1, itemQuantity - 1))}
                   >
-                    <Minus className="w-5 h-5" />
+                    <Minus className="w-6 h-6" />
                   </Button>
-                  <span className="text-2xl font-bold w-12 text-center">{itemQuantity}</span>
+                  <span className="text-3xl font-bold w-12 text-center">{itemQuantity}</span>
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-12 w-12"
+                    className="h-14 w-14 rounded-full"
                     onClick={() => setItemQuantity(itemQuantity + 1)}
                   >
-                    <Plus className="w-5 h-5" />
+                    <Plus className="w-6 h-6" />
                   </Button>
                 </div>
-              </div>
 
-              <DialogFooter>
-                <Button className="w-full h-12" onClick={addToCartFromDialog}>
-                  <Plus className="w-5 h-5 mr-2" />
-                  Adicionar {formatCurrency(selectedItem.sell_price * itemQuantity)}
+                <Button className="w-full h-14 text-lg" onClick={addToCartFromDialog}>
+                  {cart.some((c) => c.menuItemId === selectedItem.id) ? (
+                    <>Atualizar • {formatCurrency(selectedItem.sell_price * itemQuantity)}</>
+                  ) : (
+                    <>Adicionar • {formatCurrency(selectedItem.sell_price * itemQuantity)}</>
+                  )}
                 </Button>
-              </DialogFooter>
+              </div>
             </>
           )}
         </DialogContent>
