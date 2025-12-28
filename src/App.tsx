@@ -14,6 +14,7 @@ import FichasTecnicas from "./pages/FichasTecnicas";
 import Cardapio from "./pages/Cardapio";
 import Pedidos from "./pages/Pedidos";
 import Cozinha from "./pages/Cozinha";
+import Garcom from "./pages/Garcom";
 import Financeiro from "./pages/Financeiro";
 import Cliente from "./pages/Cliente";
 import QRCodeMesas from "./pages/QRCodeMesas";
@@ -44,6 +45,7 @@ const App = () => (
             <Route path="/cardapio" element={<Cardapio />} />
             <Route path="/pedidos" element={<Pedidos />} />
             <Route path="/cozinha" element={<Cozinha />} />
+            <Route path="/garcom" element={<Garcom />} />
             <Route path="/financeiro" element={<Financeiro />} />
             <Route path="/cliente" element={<Cliente />} />
             <Route path="/qrcodes" element={<QRCodeMesas />} />

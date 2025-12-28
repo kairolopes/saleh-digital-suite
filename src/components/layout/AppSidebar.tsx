@@ -30,6 +30,7 @@ import {
   Truck,
   QrCode,
   CalendarDays,
+  HandPlatter,
 } from 'lucide-react';
 
 const menuItems = [
@@ -79,7 +80,13 @@ const menuItems = [
     title: 'Pedidos', 
     icon: ClipboardList, 
     path: '/pedidos', 
-    roles: ['admin', 'garcom', 'cozinha'] 
+    roles: ['admin'] 
+  },
+  { 
+    title: 'Garçom', 
+    icon: HandPlatter, 
+    path: '/garcom', 
+    roles: ['admin', 'garcom'] 
   },
   { 
     title: 'Cozinha', 
