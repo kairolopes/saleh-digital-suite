@@ -11,7 +11,6 @@ import Compras from "./pages/Compras";
 import Fornecedores from "./pages/Fornecedores";
 import HistoricoPrecos from "./pages/HistoricoPrecos";
 import FichasTecnicas from "./pages/FichasTecnicas";
-import FichaTecnicaDetalhe from "./pages/FichaTecnicaDetalhe";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,7 +30,6 @@ const App = () => (
             <Route path="/fornecedores" element={<Fornecedores />} />
             <Route path="/historico-precos" element={<HistoricoPrecos />} />
             <Route path="/fichas-tecnicas" element={<FichasTecnicas />} />
-            <Route path="/fichas-tecnicas/:id" element={<FichaTecnicaDetalhe />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
