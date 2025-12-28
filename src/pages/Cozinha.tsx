@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, CheckCircle, ChefHat, AlertTriangle } from "lucide-react";
+import { useKitchenNotifications } from "@/hooks/useKitchenNotifications";
+import { Clock, CheckCircle, ChefHat, AlertTriangle, Bell, Volume2, VolumeX } from "lucide-react";
+import { useState, useCallback } from "react";
 
 interface OrderItem {
   id: string;
@@ -35,6 +37,18 @@ interface Order {
 export default function Cozinha() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Realtime notifications
+  const handleNewOrder = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["kitchen-orders"] });
+  }, [queryClient]);
+
+  useKitchenNotifications({
+    enabled: true,
+    onNewOrder: handleNewOrder,
+    playSound: soundEnabled,
+  });
 
   // Fetch orders in preparation or ready to prepare
   const { data: orders, isLoading } = useQuery({
@@ -51,12 +65,11 @@ export default function Cozinha() {
             )
           )
         `)
-        .in("status", ["confirmed", "preparing"])
+        .in("status", ["pending", "confirmed", "preparing"])
         .order("created_at", { ascending: true });
       if (error) throw error;
       return data as Order[];
     },
-    refetchInterval: 10000, // Refresh every 10 seconds
   });
 
   // Update order status
@@ -104,6 +117,7 @@ export default function Cozinha() {
     return minutes;
   };
 
+  const newOrders = orders?.filter((o) => o.status === "pending") || [];
   const pendingOrders = orders?.filter((o) => o.status === "confirmed") || [];
   const preparingOrders = orders?.filter((o) => o.status === "preparing") || [];
 
@@ -128,18 +142,41 @@ export default function Cozinha() {
               </p>
             </div>
           </div>
-          <div className="flex gap-4">
-            <div className="text-center">
-              <div className="text-3xl font-bold text-yellow-600">
-                {pendingOrders.length}
+          <div className="flex items-center gap-4">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              title={soundEnabled ? "Desativar som" : "Ativar som"}
+            >
+              {soundEnabled ? (
+                <Volume2 className="h-4 w-4" />
+              ) : (
+                <VolumeX className="h-4 w-4" />
+              )}
+            </Button>
+            <div className="flex gap-4">
+              {newOrders.length > 0 && (
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-red-600 animate-pulse flex items-center gap-1">
+                    <Bell className="h-5 w-5" />
+                    {newOrders.length}
+                  </div>
+                  <div className="text-sm text-muted-foreground">Novos</div>
+                </div>
+              )}
+              <div className="text-center">
+                <div className="text-3xl font-bold text-yellow-600">
+                  {pendingOrders.length}
+                </div>
+                <div className="text-sm text-muted-foreground">Confirmados</div>
               </div>
-              <div className="text-sm text-muted-foreground">Aguardando</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-orange-600">
-                {preparingOrders.length}
+              <div className="text-center">
+                <div className="text-3xl font-bold text-orange-600">
+                  {preparingOrders.length}
+                </div>
+                <div className="text-sm text-muted-foreground">Preparando</div>
               </div>
-              <div className="text-sm text-muted-foreground">Preparando</div>
             </div>
           </div>
         </div>
