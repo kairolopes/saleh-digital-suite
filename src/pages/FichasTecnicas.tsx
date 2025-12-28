@@ -35,6 +35,7 @@ interface Recipe {
   name: string;
   recipe_type: string;
   yield_quantity: number;
+  yield_unit: string | null;
   is_available: boolean;
   created_at: string;
 }
@@ -54,7 +55,8 @@ interface RecipeFormData {
   yield_quantity: number;
   profit_percent: number;
   ingredients: {
-    product_id: string;
+    product_id: string | null;
+    subrecipe_id: string | null;
     quantity: number;
     unit: string;
   }[];
@@ -77,8 +79,9 @@ export default function FichasTecnicas() {
     profit_percent: 0,
     ingredients: [],
   });
+  const [ingredientType, setIngredientType] = useState<"product" | "subrecipe">("product");
   const [currentIngredient, setCurrentIngredient] = useState({
-    product_id: "",
+    item_id: "",
     quantity: "",
     unit: "",
   });
@@ -97,6 +100,9 @@ export default function FichasTecnicas() {
       return data as Recipe[];
     },
   });
+
+  // Fetch subproducts (SP recipes that can be used as ingredients)
+  const subproducts = recipes?.filter((r) => r.recipe_type === "subproduto") || [];
 
   // Fetch products (insumos)
   const { data: products } = useQuery({
@@ -176,7 +182,8 @@ export default function FichasTecnicas() {
       if (data.ingredients.length > 0) {
         const items = data.ingredients.map((ing) => ({
           recipe_id: newRecipe.id,
-          product_id: ing.product_id,
+          product_id: ing.product_id || null,
+          subrecipe_id: ing.subrecipe_id || null,
           quantity: ing.quantity,
           unit: ing.unit,
         }));
@@ -189,11 +196,31 @@ export default function FichasTecnicas() {
 
       // Calculate sell price based on cost + profit%
       const totalCost = data.ingredients.reduce((sum, ing) => {
-        const product = products?.find((p) => p.id === ing.product_id);
-        return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+        if (ing.product_id) {
+          const product = products?.find((p) => p.id === ing.product_id);
+          return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+        } else if (ing.subrecipe_id) {
+          const subCost = calculateRecipeCostTemp(ing.subrecipe_id);
+          const sub = recipes?.find((r) => r.id === ing.subrecipe_id);
+          return sum + (sub ? (subCost / sub.yield_quantity) * ing.quantity : 0);
+        }
+        return sum;
       }, 0);
       const costPerPortion = totalCost / data.yield_quantity;
       const sellPrice = costPerPortion * (1 + data.profit_percent / 100);
+      
+      // Helper function to calculate subrecipe cost
+      function calculateRecipeCostTemp(recipeId: string): number {
+        const items = allRecipeItems?.filter((i) => i.recipe_id === recipeId) || [];
+        let cost = 0;
+        items.forEach((item) => {
+          if (item.product_id) {
+            const product = products?.find((p) => p.id === item.product_id);
+            if (product) cost += Number(item.quantity) * Number(product.average_price);
+          }
+        });
+        return cost;
+      }
 
       if (sellPrice > 0) {
         const { error: menuError } = await supabase.from("menu_items").insert({
@@ -238,7 +265,8 @@ export default function FichasTecnicas() {
       if (data.ingredients.length > 0) {
         const items = data.ingredients.map((ing) => ({
           recipe_id: id,
-          product_id: ing.product_id,
+          product_id: ing.product_id || null,
+          subrecipe_id: ing.subrecipe_id || null,
           quantity: ing.quantity,
           unit: ing.unit,
         }));
@@ -251,8 +279,15 @@ export default function FichasTecnicas() {
 
       // Calculate sell price based on cost + profit%
       const totalCost = data.ingredients.reduce((sum, ing) => {
-        const product = products?.find((p) => p.id === ing.product_id);
-        return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+        if (ing.product_id) {
+          const product = products?.find((p) => p.id === ing.product_id);
+          return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+        } else if (ing.subrecipe_id) {
+          const subCost = calculateRecipeCost(ing.subrecipe_id);
+          const sub = recipes?.find((r) => r.id === ing.subrecipe_id);
+          return sum + (sub ? (subCost / sub.yield_quantity) * ing.quantity : 0);
+        }
+        return sum;
       }, 0);
       const costPerPortion = totalCost / data.yield_quantity;
       const sellPrice = costPerPortion * (1 + data.profit_percent / 100);
@@ -310,7 +345,8 @@ export default function FichasTecnicas() {
       profit_percent: 0,
       ingredients: [],
     });
-    setCurrentIngredient({ product_id: "", quantity: "", unit: "" });
+    setIngredientType("product");
+    setCurrentIngredient({ item_id: "", quantity: "", unit: "" });
     setEditingRecipe(null);
     setIsDialogOpen(false);
   };
@@ -320,18 +356,25 @@ export default function FichasTecnicas() {
     const menuItem = menuItems?.find((m) => m.recipe_id === recipe.id);
     const isSubproduct = recipe.recipe_type === "subproduto" || recipe.name.startsWith("SP ");
 
-    // Calculate profit percent from sell price and cost
-    const ingredients = recipeItems
-      .filter((i) => i.product_id)
-      .map((i) => ({
-        product_id: i.product_id!,
-        quantity: Number(i.quantity),
-        unit: i.unit,
-      }));
+    // Map all ingredients including subrecipes
+    const ingredients = recipeItems.map((i) => ({
+      product_id: i.product_id,
+      subrecipe_id: i.subrecipe_id,
+      quantity: Number(i.quantity),
+      unit: i.unit,
+    }));
 
+    // Calculate total cost including subrecipes
     const totalCost = ingredients.reduce((sum, ing) => {
-      const product = products?.find((p) => p.id === ing.product_id);
-      return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+      if (ing.product_id) {
+        const product = products?.find((p) => p.id === ing.product_id);
+        return sum + (product ? Number(product.average_price) * ing.quantity : 0);
+      } else if (ing.subrecipe_id) {
+        const subCost = calculateRecipeCost(ing.subrecipe_id);
+        const sub = recipes?.find((r) => r.id === ing.subrecipe_id);
+        return sum + (sub ? (subCost / sub.yield_quantity) * ing.quantity : 0);
+      }
+      return sum;
     }, 0);
     const costPerPortion = totalCost / recipe.yield_quantity;
     const sellPrice = menuItem?.sell_price || 0;
@@ -345,29 +388,45 @@ export default function FichasTecnicas() {
       profit_percent: Math.round(profitPercent * 100) / 100,
       ingredients,
     });
+    setIngredientType("product");
+    setCurrentIngredient({ item_id: "", quantity: "", unit: "" });
     setIsDialogOpen(true);
   };
 
   const handleAddIngredient = () => {
     const qty = parseDecimal(currentIngredient.quantity);
-    if (!currentIngredient.product_id || qty <= 0) {
+    if (!currentIngredient.item_id || qty <= 0) {
       toast({ title: "Selecione um insumo e quantidade válida", variant: "destructive" });
       return;
     }
 
-    const product = products?.find((p) => p.id === currentIngredient.product_id);
+    let unit = currentIngredient.unit;
+    let product_id: string | null = null;
+    let subrecipe_id: string | null = null;
+
+    if (ingredientType === "product") {
+      const product = products?.find((p) => p.id === currentIngredient.item_id);
+      unit = unit || product?.unit || "";
+      product_id = currentIngredient.item_id;
+    } else {
+      const sub = recipes?.find((r) => r.id === currentIngredient.item_id);
+      unit = unit || sub?.yield_unit || "porção";
+      subrecipe_id = currentIngredient.item_id;
+    }
+
     setFormData({
       ...formData,
       ingredients: [
         ...formData.ingredients,
         {
-          product_id: currentIngredient.product_id,
+          product_id,
+          subrecipe_id,
           quantity: qty,
-          unit: product?.unit || currentIngredient.unit,
+          unit,
         },
       ],
     });
-    setCurrentIngredient({ product_id: "", quantity: "", unit: "" });
+    setCurrentIngredient({ item_id: "", quantity: "", unit: "" });
   };
 
   const handleRemoveIngredient = (index: number) => {
@@ -390,17 +449,35 @@ export default function FichasTecnicas() {
     }
   };
 
-  // Calculate ingredient cost based on average price * quantity
-  const getIngredientCost = (productId: string, quantity: number): number => {
-    const product = products?.find((p) => p.id === productId);
-    if (!product) return 0;
-    return Number(product.average_price) * quantity;
+  // Calculate ingredient cost based on average price * quantity (for products or subrecipes)
+  const getIngredientCost = (productId: string | null, subrecipeId: string | null, quantity: number): number => {
+    if (productId) {
+      const product = products?.find((p) => p.id === productId);
+      if (!product) return 0;
+      return Number(product.average_price) * quantity;
+    } else if (subrecipeId) {
+      const subCost = calculateRecipeCost(subrecipeId);
+      const sub = recipes?.find((r) => r.id === subrecipeId);
+      if (!sub) return 0;
+      return (subCost / sub.yield_quantity) * quantity;
+    }
+    return 0;
+  };
+
+  // Get current ingredient cost for form display
+  const getCurrentIngredientCost = (): number => {
+    const qty = parseDecimal(currentIngredient.quantity);
+    if (ingredientType === "product") {
+      return getIngredientCost(currentIngredient.item_id, null, qty);
+    } else {
+      return getIngredientCost(null, currentIngredient.item_id, qty);
+    }
   };
 
   // Get total cost of form ingredients
   const getFormTotalCost = (): number => {
     return formData.ingredients.reduce((total, ing) => {
-      return total + getIngredientCost(ing.product_id, ing.quantity);
+      return total + getIngredientCost(ing.product_id, ing.subrecipe_id, ing.quantity);
     }, 0);
   };
 
@@ -666,66 +743,114 @@ export default function FichasTecnicas() {
                 <Label>Ingredientes da Ficha Técnica</Label>
                 
                 {/* Add ingredient row */}
-                <div className="flex gap-2 items-end">
-                  <div className="flex-1">
-                    <Label className="text-xs text-muted-foreground">Insumo</Label>
-                    <Select
-                      value={currentIngredient.product_id}
-                      onValueChange={(value) => {
-                        const product = products?.find((p) => p.id === value);
-                        setCurrentIngredient({
-                          ...currentIngredient,
-                          product_id: value,
-                          unit: product?.unit || "",
-                        });
+                <div className="space-y-2">
+                  {/* Ingredient type selector */}
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={ingredientType === "product" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setIngredientType("product");
+                        setCurrentIngredient({ item_id: "", quantity: "", unit: "" });
                       }}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {products?.map((product) => (
-                          <SelectItem key={product.id} value={product.id}>
-                            {product.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      Insumo do Estoque
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={ingredientType === "subrecipe" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setIngredientType("subrecipe");
+                        setCurrentIngredient({ item_id: "", quantity: "", unit: "" });
+                      }}
+                      disabled={subproducts.length === 0}
+                    >
+                      Subproduto (SP)
+                    </Button>
                   </div>
-                  <div className="w-24">
-                    <Label className="text-xs text-muted-foreground">Qtd.</Label>
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      value={currentIngredient.quantity}
-                      onChange={(e) =>
-                        setCurrentIngredient({
-                          ...currentIngredient,
-                          quantity: e.target.value,
-                        })
-                      }
-                      placeholder="0,05"
-                    />
-                  </div>
-                  <div className="w-20">
-                    <Label className="text-xs text-muted-foreground">Unid.</Label>
-                    <Input
-                      value={currentIngredient.unit}
-                      onChange={(e) =>
-                        setCurrentIngredient({ ...currentIngredient, unit: e.target.value })
-                      }
-                      placeholder="kg"
-                    />
-                  </div>
-                  <div className="w-24">
-                    <Label className="text-xs text-muted-foreground">Custo Est.</Label>
-                    <div className="h-10 flex items-center text-sm">
-                      R$ {getIngredientCost(currentIngredient.product_id, parseDecimal(currentIngredient.quantity)).toFixed(2)}
+
+                  <div className="flex gap-2 items-end">
+                    <div className="flex-1">
+                      <Label className="text-xs text-muted-foreground">
+                        {ingredientType === "product" ? "Insumo" : "Subproduto (SP)"}
+                      </Label>
+                      <Select
+                        value={currentIngredient.item_id}
+                        onValueChange={(value) => {
+                          if (ingredientType === "product") {
+                            const product = products?.find((p) => p.id === value);
+                            setCurrentIngredient({
+                              item_id: value,
+                              quantity: currentIngredient.quantity,
+                              unit: product?.unit || "",
+                            });
+                          } else {
+                            const sub = recipes?.find((r) => r.id === value);
+                            setCurrentIngredient({
+                              item_id: value,
+                              quantity: currentIngredient.quantity,
+                              unit: sub?.yield_unit || "porção",
+                            });
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ingredientType === "product"
+                            ? products?.map((product) => (
+                                <SelectItem key={product.id} value={product.id}>
+                                  {product.name}
+                                </SelectItem>
+                              ))
+                            : subproducts
+                                .filter((sp) => sp.id !== editingRecipe?.id) // Exclude self
+                                .map((sp) => (
+                                  <SelectItem key={sp.id} value={sp.id}>
+                                    {sp.name}
+                                  </SelectItem>
+                                ))}
+                        </SelectContent>
+                      </Select>
                     </div>
+                    <div className="w-24">
+                      <Label className="text-xs text-muted-foreground">Qtd.</Label>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={currentIngredient.quantity}
+                        onChange={(e) =>
+                          setCurrentIngredient({
+                            ...currentIngredient,
+                            quantity: e.target.value,
+                          })
+                        }
+                        placeholder="0,05"
+                      />
+                    </div>
+                    <div className="w-20">
+                      <Label className="text-xs text-muted-foreground">Unid.</Label>
+                      <Input
+                        value={currentIngredient.unit}
+                        onChange={(e) =>
+                          setCurrentIngredient({ ...currentIngredient, unit: e.target.value })
+                        }
+                        placeholder="kg"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <Label className="text-xs text-muted-foreground">Custo Est.</Label>
+                      <div className="h-10 flex items-center text-sm">
+                        R$ {getCurrentIngredientCost().toFixed(2)}
+                      </div>
+                    </div>
+                    <Button type="button" size="icon" onClick={handleAddIngredient}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <Button type="button" size="icon" onClick={handleAddIngredient}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
                 </div>
 
                 {/* Ingredients list */}
@@ -743,11 +868,13 @@ export default function FichasTecnicas() {
                       </thead>
                       <tbody>
                         {formData.ingredients.map((ing, index) => {
-                          const product = products?.find((p) => p.id === ing.product_id);
-                          const cost = getIngredientCost(ing.product_id, ing.quantity);
+                          const product = ing.product_id ? products?.find((p) => p.id === ing.product_id) : null;
+                          const subrecipe = ing.subrecipe_id ? recipes?.find((r) => r.id === ing.subrecipe_id) : null;
+                          const name = product?.name || (subrecipe ? `SP ${subrecipe.name}` : "N/A");
+                          const cost = getIngredientCost(ing.product_id, ing.subrecipe_id, ing.quantity);
                           return (
                             <tr key={index} className="border-t border-border">
-                              <td className="py-2 px-3">{product?.name || "N/A"}</td>
+                              <td className="py-2 px-3">{name}</td>
                               <td className="text-center py-2 px-3">{ing.quantity.toFixed(3)}</td>
                               <td className="text-center py-2 px-3">{ing.unit}</td>
                               <td className="text-right py-2 px-3">R$ {cost.toFixed(2)}</td>
