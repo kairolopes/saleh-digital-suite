@@ -45,6 +45,7 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
+  Bell,
 } from 'lucide-react';
 
 interface Reservation {
@@ -262,10 +263,37 @@ export default function Reservas() {
               Gerencie as reservas de mesas do restaurante
             </p>
           </div>
-          <Button onClick={() => setIsNewReservationOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Nova Reserva
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline"
+              onClick={async () => {
+                toast.info('Enviando lembretes de teste...');
+                try {
+                  const { data, error } = await supabase.functions.invoke('send-reservation-reminder', {
+                    body: { forceRun: true },
+                  });
+                  if (error) throw error;
+                  if (data?.message === "No reservations to remind") {
+                    toast.info('Nenhuma reserva confirmada para amanhã');
+                  } else if (data?.message === "No webhook URL configured") {
+                    toast.warning('URL de webhook não configurada nas configurações');
+                  } else {
+                    toast.success(`Lembretes enviados: ${data?.success || 0} sucesso, ${data?.errors || 0} erros`);
+                  }
+                } catch (err) {
+                  console.error('Erro ao testar lembretes:', err);
+                  toast.error('Erro ao enviar lembretes de teste');
+                }
+              }}
+            >
+              <Bell className="mr-2 h-4 w-4" />
+              Testar Lembretes
+            </Button>
+            <Button onClick={() => setIsNewReservationOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Nova Reserva
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}
