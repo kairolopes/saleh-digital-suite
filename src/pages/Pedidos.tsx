@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useWaiterNotifications } from "@/hooks/useWaiterNotifications";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +24,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Minus, ShoppingCart, Clock, CheckCircle, XCircle, Trash2 } from "lucide-react";
+import { Plus, Minus, ShoppingCart, Clock, CheckCircle, XCircle, Trash2, Volume2, VolumeX, Bell } from "lucide-react";
 
 interface MenuItem {
   id: string;
@@ -92,6 +94,16 @@ export default function Pedidos() {
   const [orderNotes, setOrderNotes] = useState("");
   const [cart, setCart] = useState<{ menuItem: MenuItem; quantity: number; notes: string }[]>([]);
   const [activeTab, setActiveTab] = useState("active");
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Real-time notifications for when orders are ready
+  useWaiterNotifications({
+    enabled: true,
+    playSound: soundEnabled,
+    onOrderReady: () => {
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+    },
+  });
 
   // Fetch menu items
   const { data: menuItems } = useQuery({
@@ -296,10 +308,25 @@ export default function Pedidos() {
               Gerencie os pedidos do restaurante
             </p>
           </div>
-          <Button onClick={() => setIsNewOrderOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Novo Pedido
-          </Button>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted">
+              <Bell className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Som</span>
+              <Switch
+                checked={soundEnabled}
+                onCheckedChange={setSoundEnabled}
+              />
+              {soundEnabled ? (
+                <Volume2 className="h-4 w-4 text-green-500" />
+              ) : (
+                <VolumeX className="h-4 w-4 text-muted-foreground" />
+              )}
+            </div>
+            <Button onClick={() => setIsNewOrderOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Novo Pedido
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}
