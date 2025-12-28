@@ -16,6 +16,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -508,34 +519,59 @@ export default function Reservas() {
                                 <TableCell>
                                   <div className="flex gap-2">
                                     {(reservation.status === 'pending' || reservation.status === 'confirmed') && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="text-blue-600 hover:bg-blue-50"
-                                        title="Enviar lembrete"
-                                        onClick={async () => {
-                                          toast.info('Enviando lembrete...');
-                                          try {
-                                            const { data, error } = await supabase.functions.invoke('send-reservation-reminder', {
-                                              body: { reservationId: reservation.id },
-                                            });
-                                            if (error) throw error;
-                                            if (data?.error) {
-                                              toast.error(data.error === 'No webhook URL configured' 
-                                                ? 'URL de webhook não configurada' 
-                                                : data.error);
-                                            } else {
-                                              toast.success('Lembrete enviado com sucesso!');
-                                              queryClient.invalidateQueries({ queryKey: ['reservations'] });
-                                            }
-                                          } catch (err) {
-                                            console.error('Error sending reminder:', err);
-                                            toast.error('Erro ao enviar lembrete');
-                                          }
-                                        }}
-                                      >
-                                        <Bell className="h-4 w-4" />
-                                      </Button>
+                                      <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="text-blue-600 hover:bg-blue-50"
+                                            title="Enviar lembrete"
+                                          >
+                                            <Bell className="h-4 w-4" />
+                                          </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                          <AlertDialogHeader>
+                                            <AlertDialogTitle>Enviar lembrete?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                              Será enviado um lembrete para {reservation.customer_name} sobre a reserva 
+                                              em {format(parseISO(reservation.reservation_date), "dd/MM/yyyy", { locale: ptBR })} às {reservation.reservation_time}.
+                                              {reservation.reminder_sent_at && (
+                                                <span className="block mt-2 text-amber-600">
+                                                  ⚠️ Um lembrete já foi enviado em {format(parseISO(reservation.reminder_sent_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}.
+                                                </span>
+                                              )}
+                                            </AlertDialogDescription>
+                                          </AlertDialogHeader>
+                                          <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                            <AlertDialogAction
+                                              onClick={async () => {
+                                                toast.info('Enviando lembrete...');
+                                                try {
+                                                  const { data, error } = await supabase.functions.invoke('send-reservation-reminder', {
+                                                    body: { reservationId: reservation.id },
+                                                  });
+                                                  if (error) throw error;
+                                                  if (data?.error) {
+                                                    toast.error(data.error === 'No webhook URL configured' 
+                                                      ? 'URL de webhook não configurada' 
+                                                      : data.error);
+                                                  } else {
+                                                    toast.success('Lembrete enviado com sucesso!');
+                                                    queryClient.invalidateQueries({ queryKey: ['reservations'] });
+                                                  }
+                                                } catch (err) {
+                                                  console.error('Error sending reminder:', err);
+                                                  toast.error('Erro ao enviar lembrete');
+                                                }
+                                              }}
+                                            >
+                                              Enviar
+                                            </AlertDialogAction>
+                                          </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                      </AlertDialog>
                                     )}
                                     {reservation.status === 'pending' && (
                                       <>
