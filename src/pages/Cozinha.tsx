@@ -183,148 +183,164 @@ export default function Cozinha() {
 
   return (
     <AppLayout requiredRoles={["admin", "cozinha"]}>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-              <ChefHat className="h-6 w-6 text-primary-foreground" />
+      <div className="min-h-screen">
+        {/* Header - Tablet Optimized */}
+        <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b pb-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center">
+                <ChefHat className="h-6 w-6 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold">Cozinha</h1>
+                <p className="text-muted-foreground text-sm">Gerencie os pedidos</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl font-bold text-foreground">Cozinha</h1>
-              <p className="text-muted-foreground">
-                Gerencie a preparação dos pedidos
-              </p>
+            <div className="flex items-center gap-4">
+              <Button
+                variant="outline"
+                size="lg"
+                className="h-14 w-14"
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                title={soundEnabled ? "Desativar som" : "Ativar som"}
+              >
+                {soundEnabled ? (
+                  <Volume2 className="h-6 w-6 text-green-500" />
+                ) : (
+                  <VolumeX className="h-6 w-6 text-muted-foreground" />
+                )}
+              </Button>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              title={soundEnabled ? "Desativar som" : "Ativar som"}
-            >
-              {soundEnabled ? (
-                <Volume2 className="h-4 w-4" />
-              ) : (
-                <VolumeX className="h-4 w-4" />
-              )}
-            </Button>
-            <div className="flex gap-4">
-              {newOrders.length > 0 && (
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-red-600 animate-pulse flex items-center gap-1">
-                    <Bell className="h-5 w-5" />
-                    {newOrders.length}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Novos</div>
-                </div>
-              )}
-              <div className="text-center">
-                <div className="text-3xl font-bold text-yellow-600">
-                  {confirmedOrders.length}
-                </div>
-                <div className="text-sm text-muted-foreground">Confirmados</div>
+
+          {/* Stats - Large Touch Targets */}
+          <div className="grid grid-cols-3 gap-4 mt-4">
+            <div className={`rounded-2xl p-4 text-center ${newOrders.length > 0 ? 'bg-red-500/10 border-2 border-red-500 animate-pulse' : 'bg-muted/50 border border-border'}`}>
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <Bell className={`h-5 w-5 ${newOrders.length > 0 ? 'text-red-600' : 'text-muted-foreground'}`} />
+                <span className={`text-3xl font-bold ${newOrders.length > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>{newOrders.length}</span>
               </div>
-              <div className="text-center">
-                <div className="text-3xl font-bold text-orange-600">
-                  {preparingOrders.length}
-                </div>
-                <div className="text-sm text-muted-foreground">Preparando</div>
+              <p className={`text-sm font-medium ${newOrders.length > 0 ? 'text-red-700' : 'text-muted-foreground'}`}>Novos</p>
+            </div>
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-center">
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <Clock className="h-5 w-5 text-amber-600" />
+                <span className="text-3xl font-bold text-amber-600">{confirmedOrders.length}</span>
               </div>
+              <p className="text-sm font-medium text-amber-700">Aguardando</p>
+            </div>
+            <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-4 text-center">
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <ChefHat className="h-5 w-5 text-orange-600" />
+                <span className="text-3xl font-bold text-orange-600">{preparingOrders.length}</span>
+              </div>
+              <p className="text-sm font-medium text-orange-700">Preparando</p>
             </div>
           </div>
         </div>
 
         {isLoading ? (
-          <p className="text-center py-8 text-muted-foreground">Carregando...</p>
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">Carregando pedidos...</p>
+          </div>
         ) : !orders?.length ? (
           <div className="text-center py-16">
-            <ChefHat className="mx-auto h-16 w-16 text-muted-foreground/50" />
+            <ChefHat className="mx-auto h-20 w-20 text-muted-foreground/30" />
             <p className="mt-4 text-xl text-muted-foreground">
               Nenhum pedido para preparar
+            </p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Os pedidos aparecerão aqui automaticamente
             </p>
           </div>
         ) : (
           <div className="space-y-8">
-            {/* New Orders - Need Accept/Reject */}
+            {/* New Orders - Need Accept/Reject - Large Touch Targets */}
             {newOrders.length > 0 && (
               <div>
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                  <Bell className="h-5 w-5 text-red-600" />
-                  Novos Pedidos - Aguardando Aceite ({newOrders.length})
-                </h2>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <Bell className="h-6 w-6 text-red-600 animate-bounce" />
+                  <h2 className="text-xl font-bold text-red-700">
+                    Novos Pedidos ({newOrders.length})
+                  </h2>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {newOrders.map((order) => (
-                    <Card key={order.id} className="border-l-4 border-l-red-500 animate-pulse">
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-center">
-                          <CardTitle className="text-lg">
-                            #{order.order_number}
+                    <Card 
+                      key={order.id} 
+                      className="border-2 border-red-500 bg-red-50 dark:bg-red-950/30 shadow-lg shadow-red-500/20 animate-pulse"
+                    >
+                      <CardContent className="p-6">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <span className="text-3xl font-black text-red-700">
+                              #{order.order_number}
+                            </span>
                             {order.table_number && (
-                              <Badge variant="outline" className="ml-2">
-                                Mesa {order.table_number}
-                              </Badge>
+                              <div className="flex items-center gap-1 mt-1 text-red-700">
+                                <span className="font-bold text-lg">Mesa {order.table_number}</span>
+                              </div>
                             )}
-                          </CardTitle>
-                          <Badge variant="destructive">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {getWaitingTime(order.created_at)} min
+                          </div>
+                          <Badge className="bg-red-600 text-white text-lg px-4 py-1">
+                            <Clock className="h-4 w-4 mr-1" />
+                            {getWaitingTime(order.created_at)}min
                           </Badge>
                         </div>
+                        
                         {(order.customer_name || order.customer_phone) && (
-                          <div className="flex gap-3 text-sm text-muted-foreground mt-2">
+                          <div className="flex flex-wrap gap-3 text-red-800 mb-3">
                             {order.customer_name && (
-                              <span className="flex items-center gap-1">
-                                <User className="h-3 w-3" />
+                              <span className="flex items-center gap-1 font-medium">
+                                <User className="h-4 w-4" />
                                 {order.customer_name}
                               </span>
                             )}
                             {order.customer_phone && (
                               <span className="flex items-center gap-1">
-                                <Phone className="h-3 w-3" />
+                                <Phone className="h-4 w-4" />
                                 {order.customer_phone}
                               </span>
                             )}
                           </div>
                         )}
-                      </CardHeader>
-                      <CardContent>
+
                         <div className="space-y-2 mb-4">
                           {order.order_items?.map((item) => (
                             <div
                               key={item.id}
-                              className="flex items-center justify-between p-2 rounded bg-muted/50"
+                              className="p-3 rounded-lg bg-white/50 dark:bg-black/20"
                             >
-                              <div>
-                                <span className="font-medium">
-                                  {item.quantity}x {item.menu_items?.recipes?.name}
-                                </span>
-                                {item.notes && (
-                                  <p className="text-xs text-orange-600 flex items-center gap-1">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    {item.notes}
-                                  </p>
-                                )}
-                              </div>
+                              <span className="font-bold text-lg text-red-800">
+                                {item.quantity}x {item.menu_items?.recipes?.name}
+                              </span>
+                              {item.notes && (
+                                <p className="text-orange-600 flex items-center gap-1 mt-1">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  {item.notes}
+                                </p>
+                              )}
                             </div>
                           ))}
                         </div>
+
                         {order.notes && (
-                          <div className="mb-4 p-2 rounded bg-orange-100 text-orange-800 text-sm">
+                          <div className="mb-4 p-3 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200">
                             <strong>Obs:</strong> {order.notes}
                           </div>
                         )}
-                        <div className="grid grid-cols-2 gap-2">
+
+                        <div className="grid grid-cols-2 gap-3">
                           <Button
                             variant="outline"
-                            className="text-destructive border-destructive"
+                            className="h-14 text-lg font-bold border-2 border-red-500 text-red-600 hover:bg-red-100"
                             onClick={() => handleReject(order)}
                           >
-                            <XCircle className="h-4 w-4 mr-2" />
+                            <XCircle className="h-5 w-5 mr-2" />
                             Recusar
                           </Button>
                           <Button
+                            className="h-14 text-lg font-bold bg-green-600 hover:bg-green-700"
                             onClick={() =>
                               updateOrderMutation.mutate({
                                 orderId: order.id,
@@ -332,7 +348,7 @@ export default function Cozinha() {
                               })
                             }
                           >
-                            <CheckCircle className="h-4 w-4 mr-2" />
+                            <CheckCircle className="h-5 w-5 mr-2" />
                             Aceitar
                           </Button>
                         </div>
@@ -344,79 +360,81 @@ export default function Cozinha() {
             )}
 
             <div className="grid lg:grid-cols-2 gap-6">
-              {/* Confirmed Orders */}
+              {/* Confirmed Orders - Tablet Optimized */}
               <div>
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                  <Clock className="h-5 w-5 text-yellow-600" />
-                  Aguardando Preparo ({confirmedOrders.length})
-                </h2>
+                <div className="flex items-center gap-2 mb-4">
+                  <Clock className="h-6 w-6 text-amber-600" />
+                  <h2 className="text-xl font-bold text-amber-700">
+                    Aguardando Preparo ({confirmedOrders.length})
+                  </h2>
+                </div>
                 <div className="space-y-4">
                   {confirmedOrders.map((order) => (
-                    <Card key={order.id} className="border-l-4 border-l-yellow-500">
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-center">
-                          <CardTitle className="text-lg">
-                            #{order.order_number}
+                    <Card 
+                      key={order.id} 
+                      className="border-2 border-amber-400 bg-amber-50/50 dark:bg-amber-950/20"
+                    >
+                      <CardContent className="p-5">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <span className="text-2xl font-bold text-amber-700">#{order.order_number}</span>
                             {order.table_number && (
-                              <Badge variant="outline" className="ml-2">
+                              <p className="text-amber-600 font-semibold mt-1">
                                 Mesa {order.table_number}
-                              </Badge>
+                              </p>
                             )}
-                          </CardTitle>
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              variant={
-                                getWaitingTime(order.created_at) > 15
-                                  ? "destructive"
-                                  : "secondary"
-                              }
-                            >
-                              <Clock className="h-3 w-3 mr-1" />
-                              {getWaitingTime(order.created_at)} min
-                            </Badge>
                           </div>
+                          <Badge
+                            className={`text-lg px-3 py-1 ${
+                              getWaitingTime(order.created_at) > 15
+                                ? "bg-red-500 text-white"
+                                : "bg-amber-500 text-white"
+                            }`}
+                          >
+                            <Clock className="h-4 w-4 mr-1" />
+                            {getWaitingTime(order.created_at)}min
+                          </Badge>
                         </div>
+                        
                         {order.customer_name && (
-                          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                            <User className="h-3 w-3" />
+                          <p className="text-amber-700 flex items-center gap-1 font-medium mb-3">
+                            <User className="h-4 w-4" />
                             {order.customer_name}
                           </p>
                         )}
-                      </CardHeader>
-                      <CardContent>
+
                         <div className="space-y-2 mb-4">
                           {order.order_items?.map((item) => (
                             <div
                               key={item.id}
-                              className="flex items-center justify-between p-2 rounded bg-muted/50"
+                              className="p-3 rounded-lg bg-white/50 dark:bg-black/20"
                             >
-                              <div>
-                                <span className="font-medium">
-                                  {item.quantity}x{" "}
-                                  {item.menu_items?.recipes?.name}
-                                </span>
-                                {item.notes && (
-                                  <p className="text-xs text-orange-600 flex items-center gap-1">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    {item.notes}
-                                  </p>
-                                )}
-                              </div>
+                              <span className="font-bold text-lg">
+                                {item.quantity}x {item.menu_items?.recipes?.name}
+                              </span>
+                              {item.notes && (
+                                <p className="text-orange-600 flex items-center gap-1 mt-1">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  {item.notes}
+                                </p>
+                              )}
                               {item.menu_items?.recipes?.preparation_time && (
-                                <span className="text-xs text-muted-foreground">
-                                  ~{item.menu_items.recipes.preparation_time} min
-                                </span>
+                                <p className="text-muted-foreground text-sm mt-1">
+                                  ~{item.menu_items.recipes.preparation_time} min preparo
+                                </p>
                               )}
                             </div>
                           ))}
                         </div>
+
                         {order.notes && (
-                          <div className="mb-4 p-2 rounded bg-orange-100 text-orange-800 text-sm">
+                          <div className="mb-4 p-3 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200">
                             <strong>Obs:</strong> {order.notes}
                           </div>
                         )}
+
                         <Button
-                          className="w-full"
+                          className="w-full h-14 text-lg font-bold bg-amber-600 hover:bg-amber-700"
                           onClick={() =>
                             updateOrderMutation.mutate({
                               orderId: order.id,
@@ -424,66 +442,71 @@ export default function Cozinha() {
                             })
                           }
                         >
-                          <ChefHat className="h-4 w-4 mr-2" />
+                          <ChefHat className="h-5 w-5 mr-2" />
                           Iniciar Preparo
                         </Button>
                       </CardContent>
                     </Card>
                   ))}
                   {confirmedOrders.length === 0 && (
-                    <p className="text-center py-4 text-muted-foreground">
+                    <p className="text-center py-8 text-muted-foreground">
                       Nenhum pedido aguardando
                     </p>
                   )}
                 </div>
               </div>
 
-              {/* Preparing Orders */}
+              {/* Preparing Orders - Tablet Optimized */}
               <div>
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                  <ChefHat className="h-5 w-5 text-orange-600" />
-                  Em Preparo ({preparingOrders.length})
-                </h2>
+                <div className="flex items-center gap-2 mb-4">
+                  <ChefHat className="h-6 w-6 text-orange-600" />
+                  <h2 className="text-xl font-bold text-orange-700">
+                    Em Preparo ({preparingOrders.length})
+                  </h2>
+                </div>
                 <div className="space-y-4">
                   {preparingOrders.map((order) => (
-                    <Card key={order.id} className="border-l-4 border-l-orange-500">
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-center">
-                          <CardTitle className="text-lg">
-                            #{order.order_number}
+                    <Card 
+                      key={order.id} 
+                      className="border-2 border-orange-400 bg-orange-50/50 dark:bg-orange-950/20"
+                    >
+                      <CardContent className="p-5">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <span className="text-2xl font-bold text-orange-700">#{order.order_number}</span>
                             {order.table_number && (
-                              <Badge variant="outline" className="ml-2">
+                              <p className="text-orange-600 font-semibold mt-1">
                                 Mesa {order.table_number}
-                              </Badge>
+                              </p>
                             )}
-                          </CardTitle>
+                          </div>
                           <Badge
-                            variant={
+                            className={`text-lg px-3 py-1 ${
                               getWaitingTime(order.created_at) > 20
-                                ? "destructive"
-                                : "outline"
-                            }
+                                ? "bg-red-500 text-white"
+                                : "bg-orange-500 text-white"
+                            }`}
                           >
-                            <Clock className="h-3 w-3 mr-1" />
-                            {getWaitingTime(order.created_at)} min
+                            <Clock className="h-4 w-4 mr-1" />
+                            {getWaitingTime(order.created_at)}min
                           </Badge>
                         </div>
+
                         {order.customer_name && (
-                          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                            <User className="h-3 w-3" />
+                          <p className="text-orange-700 flex items-center gap-1 font-medium mb-3">
+                            <User className="h-4 w-4" />
                             {order.customer_name}
                           </p>
                         )}
-                      </CardHeader>
-                      <CardContent>
+
                         <div className="space-y-2 mb-4">
                           {order.order_items?.map((item) => (
                             <div
                               key={item.id}
-                              className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors ${
+                              className={`p-4 rounded-lg cursor-pointer transition-all active:scale-95 ${
                                 item.status === "done"
-                                  ? "bg-green-100 line-through opacity-60"
-                                  : "bg-muted/50 hover:bg-muted"
+                                  ? "bg-green-100 dark:bg-green-900/30 border-2 border-green-500"
+                                  : "bg-white/50 dark:bg-black/20 border-2 border-transparent hover:border-orange-300"
                               }`}
                               onClick={() =>
                                 updateItemMutation.mutate({
@@ -492,25 +515,24 @@ export default function Cozinha() {
                                 })
                               }
                             >
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-3">
                                 <div
-                                  className={`h-5 w-5 rounded-full border-2 flex items-center justify-center ${
+                                  className={`h-8 w-8 rounded-full border-3 flex items-center justify-center flex-shrink-0 ${
                                     item.status === "done"
                                       ? "bg-green-500 border-green-500"
-                                      : "border-muted-foreground"
+                                      : "border-2 border-muted-foreground"
                                   }`}
                                 >
                                   {item.status === "done" && (
-                                    <CheckCircle className="h-4 w-4 text-white" />
+                                    <CheckCircle className="h-5 w-5 text-white" />
                                   )}
                                 </div>
-                                <div>
-                                  <span className="font-medium">
-                                    {item.quantity}x{" "}
-                                    {item.menu_items?.recipes?.name}
+                                <div className={item.status === "done" ? "line-through opacity-60" : ""}>
+                                  <span className="font-bold text-lg">
+                                    {item.quantity}x {item.menu_items?.recipes?.name}
                                   </span>
                                   {item.notes && (
-                                    <p className="text-xs text-orange-600">
+                                    <p className="text-orange-600 text-sm mt-1">
                                       {item.notes}
                                     </p>
                                   )}
@@ -519,13 +541,19 @@ export default function Cozinha() {
                             </div>
                           ))}
                         </div>
+
                         {order.notes && (
-                          <div className="mb-4 p-2 rounded bg-orange-100 text-orange-800 text-sm">
+                          <div className="mb-4 p-3 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200">
                             <strong>Obs:</strong> {order.notes}
                           </div>
                         )}
+
                         <Button
-                          className="w-full bg-green-600 hover:bg-green-700"
+                          className={`w-full h-14 text-lg font-bold ${
+                            allItemsDone(order)
+                              ? "bg-green-600 hover:bg-green-700"
+                              : "bg-muted text-muted-foreground cursor-not-allowed"
+                          }`}
                           onClick={() =>
                             updateOrderMutation.mutate({
                               orderId: order.id,
@@ -534,16 +562,16 @@ export default function Cozinha() {
                           }
                           disabled={!allItemsDone(order)}
                         >
-                          <CheckCircle className="h-4 w-4 mr-2" />
+                          <CheckCircle className="h-5 w-5 mr-2" />
                           {allItemsDone(order)
                             ? "Marcar como Pronto"
-                            : "Complete todos os itens"}
+                            : "Marque todos os itens"}
                         </Button>
                       </CardContent>
                     </Card>
                   ))}
                   {preparingOrders.length === 0 && (
-                    <p className="text-center py-4 text-muted-foreground">
+                    <p className="text-center py-8 text-muted-foreground">
                       Nenhum pedido em preparo
                     </p>
                   )}

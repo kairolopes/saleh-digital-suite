@@ -38,7 +38,7 @@ const menuItems = [
     title: 'Dashboard', 
     icon: LayoutDashboard, 
     path: '/', 
-    roles: ['admin', 'financeiro', 'estoque', 'cozinha', 'garcom'] 
+    roles: ['admin', 'financeiro', 'estoque', 'garcom'] 
   },
   { 
     title: 'Estoque', 
@@ -68,13 +68,13 @@ const menuItems = [
     title: 'Fichas Técnicas', 
     icon: BookOpen, 
     path: '/fichas-tecnicas', 
-    roles: ['admin', 'cozinha'] 
+    roles: ['admin'] 
   },
   { 
     title: 'Cardápio', 
     icon: ClipboardList, 
     path: '/cardapio', 
-    roles: ['admin', 'garcom', 'cozinha'] 
+    roles: ['admin', 'garcom'] 
   },
   { 
     title: 'Pedidos', 
