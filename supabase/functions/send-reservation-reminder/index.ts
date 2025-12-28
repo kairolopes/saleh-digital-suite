@@ -18,12 +18,40 @@ Deno.serve(async (req) => {
 
     console.log("Starting reservation reminder check...");
 
+    // Get restaurant settings first to check the configured reminder hour
+    const { data: settings, error: settingsError } = await supabase
+      .from("restaurant_settings")
+      .select("*")
+      .limit(1)
+      .maybeSingle();
+
+    if (settingsError) {
+      console.error("Error fetching settings:", settingsError);
+      throw settingsError;
+    }
+
+    // Check if current hour matches the configured reminder hour
+    const currentHour = new Date().getUTCHours();
+    const reminderHour = settings?.reminder_hour ?? 10;
+
+    console.log(`Current hour (UTC): ${currentHour}, Configured reminder hour: ${reminderHour}`);
+
+    if (currentHour !== reminderHour) {
+      console.log(`Not the right time for reminders. Current: ${currentHour}, Expected: ${reminderHour}`);
+      return new Response(
+        JSON.stringify({ 
+          message: "Not reminder time", 
+          currentHour, 
+          reminderHour 
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Get tomorrow's date
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split("T")[0];
-
-    console.log(`Checking reservations for date: ${tomorrowStr}`);
 
     // Get all confirmed reservations for tomorrow
     const { data: reservations, error: reservationsError } = await supabase
@@ -46,18 +74,6 @@ Deno.serve(async (req) => {
     }
 
     console.log(`Found ${reservations.length} reservations for tomorrow`);
-
-    // Get restaurant settings for webhook URL
-    const { data: settings, error: settingsError } = await supabase
-      .from("restaurant_settings")
-      .select("*")
-      .limit(1)
-      .maybeSingle();
-
-    if (settingsError) {
-      console.error("Error fetching settings:", settingsError);
-      throw settingsError;
-    }
 
     const webhookUrl = settings?.reservation_webhook_url;
 
