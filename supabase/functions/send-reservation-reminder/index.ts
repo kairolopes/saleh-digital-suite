@@ -16,7 +16,17 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log("Starting reservation reminder check...");
+    // Check if this is a forced test run
+    let forceRun = false;
+    try {
+      const body = await req.json();
+      forceRun = body?.forceRun === true;
+    } catch {
+      // No body or invalid JSON, that's fine
+    }
+
+    console.log(`Starting reservation reminder check... (forceRun: ${forceRun})`);
+
 
     // Get restaurant settings first to check the configured reminder hour
     const { data: settings, error: settingsError } = await supabase
@@ -36,7 +46,7 @@ Deno.serve(async (req) => {
 
     console.log(`Current hour (UTC): ${currentHour}, Configured reminder hour: ${reminderHour}`);
 
-    if (currentHour !== reminderHour) {
+    if (!forceRun && currentHour !== reminderHour) {
       console.log(`Not the right time for reminders. Current: ${currentHour}, Expected: ${reminderHour}`);
       return new Response(
         JSON.stringify({ 
@@ -46,6 +56,10 @@ Deno.serve(async (req) => {
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    if (forceRun) {
+      console.log("Force run mode - skipping time check");
     }
 
     // Get tomorrow's date
