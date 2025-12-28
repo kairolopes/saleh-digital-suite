@@ -99,6 +99,7 @@ export default function Reservas() {
   const [isNewReservationOpen, setIsNewReservationOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState('upcoming');
+  const [filterNoReminder, setFilterNoReminder] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -232,6 +233,9 @@ export default function Reservas() {
   const upcomingReservations = reservations?.filter(
     (r) => r.reservation_date >= todayStr && !['cancelled', 'completed', 'no_show'].includes(r.status)
   );
+  const filteredUpcomingReservations = filterNoReminder 
+    ? upcomingReservations?.filter((r) => !r.reminder_sent_at)
+    : upcomingReservations;
   const pastReservations = reservations?.filter(
     (r) => r.reservation_date < todayStr || ['cancelled', 'completed', 'no_show'].includes(r.status)
   );
@@ -437,16 +441,31 @@ export default function Reservas() {
           {/* Reservations List */}
           <Card className="lg:col-span-2">
             <CardHeader>
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList>
-                  <TabsTrigger value="upcoming">
-                    Próximas ({upcomingReservations?.length || 0})
-                  </TabsTrigger>
-                  <TabsTrigger value="past">
-                    Histórico ({pastReservations?.length || 0})
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+              <div className="flex items-center justify-between">
+                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                  <TabsList>
+                    <TabsTrigger value="upcoming">
+                      Próximas ({filteredUpcomingReservations?.length || 0})
+                    </TabsTrigger>
+                    <TabsTrigger value="past">
+                      Histórico ({pastReservations?.length || 0})
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                {activeTab === 'upcoming' && (
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={filterNoReminder}
+                        onChange={(e) => setFilterNoReminder(e.target.checked)}
+                        className="rounded border-border"
+                      />
+                      <span className="text-muted-foreground">Sem lembrete</span>
+                    </label>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -456,9 +475,9 @@ export default function Reservas() {
               ) : (
                 <Tabs value={activeTab}>
                   <TabsContent value="upcoming" className="mt-0">
-                    {!upcomingReservations?.length ? (
+                    {!filteredUpcomingReservations?.length ? (
                       <p className="text-center py-8 text-muted-foreground">
-                        Nenhuma reserva próxima
+                        {filterNoReminder ? 'Todas as reservas já receberam lembrete' : 'Nenhuma reserva próxima'}
                       </p>
                     ) : (
                       <div className="overflow-x-auto">
@@ -474,7 +493,7 @@ export default function Reservas() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {upcomingReservations.map((reservation) => (
+                            {filteredUpcomingReservations.map((reservation) => (
                               <TableRow key={reservation.id}>
                                 <TableCell>
                                   <div className="flex flex-col">
