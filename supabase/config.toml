@@ -42,3 +42,6 @@ verify_jwt = false
 
 [functions.send-reservation-webhook]
 verify_jwt = true
+
+[functions.send-reservation-reminder]
+verify_jwt = false
