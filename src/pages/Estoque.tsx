@@ -10,8 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Pencil, Package, AlertTriangle, TrendingUp, Search } from 'lucide-react';
+import { Plus, Pencil, Package, AlertTriangle, TrendingUp, Search, RefreshCw } from 'lucide-react';
 import { z } from 'zod';
 
 const productSchema = z.object({
@@ -43,12 +44,18 @@ export default function Estoque() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [adjustingProduct, setAdjustingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     unit: 'kg',
     min_quantity: 0,
+  });
+  const [adjustData, setAdjustData] = useState({
+    newQuantity: 0,
+    reason: '',
   });
 
   const { data: products, isLoading } = useQuery({
@@ -94,10 +101,55 @@ export default function Estoque() {
     },
   });
 
+  const adjustStockMutation = useMutation({
+    mutationFn: async ({ productId, newQuantity, oldQuantity, reason }: { 
+      productId: string; 
+      newQuantity: number; 
+      oldQuantity: number;
+      reason: string;
+    }) => {
+      const difference = newQuantity - oldQuantity;
+      const movementType = difference > 0 ? 'ajuste_entrada' : 'ajuste_saida';
+      
+      // Update product quantity
+      const { error: updateError } = await supabase
+        .from('products')
+        .update({ current_quantity: newQuantity })
+        .eq('id', productId);
+      if (updateError) throw updateError;
+
+      // Register stock movement for reporting
+      const { error: movementError } = await supabase
+        .from('stock_movements')
+        .insert({
+          product_id: productId,
+          movement_type: movementType,
+          quantity: Math.abs(difference),
+          reference_type: 'ajuste_manual',
+          notes: reason || 'Ajuste manual de estoque',
+        });
+      if (movementError) throw movementError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast({ title: 'Estoque ajustado com sucesso!' });
+      resetAdjustForm();
+    },
+    onError: (error) => {
+      toast({ title: 'Erro ao ajustar estoque', description: error.message, variant: 'destructive' });
+    },
+  });
+
   const resetForm = () => {
     setFormData({ name: '', unit: 'kg', min_quantity: 0 });
     setEditingProduct(null);
     setIsDialogOpen(false);
+  };
+
+  const resetAdjustForm = () => {
+    setAdjustData({ newQuantity: 0, reason: '' });
+    setAdjustingProduct(null);
+    setIsAdjustDialogOpen(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -119,9 +171,35 @@ export default function Estoque() {
     setFormData({
       name: product.name,
       unit: product.unit,
-      min_quantity: product.min_quantity,
+      min_quantity: product.min_quantity ?? 0,
     });
     setIsDialogOpen(true);
+  };
+
+  const handleAdjustStock = (product: Product) => {
+    setAdjustingProduct(product);
+    setAdjustData({
+      newQuantity: product.current_quantity ?? 0,
+      reason: '',
+    });
+    setIsAdjustDialogOpen(true);
+  };
+
+  const handleAdjustSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adjustingProduct) return;
+    
+    if (!adjustData.reason.trim()) {
+      toast({ title: 'Informe o motivo do ajuste', variant: 'destructive' });
+      return;
+    }
+
+    adjustStockMutation.mutate({
+      productId: adjustingProduct.id,
+      newQuantity: adjustData.newQuantity,
+      oldQuantity: adjustingProduct.current_quantity ?? 0,
+      reason: adjustData.reason,
+    });
   };
 
   const filteredProducts = products?.filter(p => 
@@ -201,6 +279,62 @@ export default function Estoque() {
             </DialogContent>
           </Dialog>
         </div>
+
+        {/* Adjust Stock Dialog */}
+        <Dialog open={isAdjustDialogOpen} onOpenChange={(open) => { setIsAdjustDialogOpen(open); if (!open) resetAdjustForm(); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Ajustar Estoque</DialogTitle>
+              <DialogDescription>
+                Corrigir quantidade de {adjustingProduct?.name}
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleAdjustSubmit} className="space-y-4">
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-sm text-muted-foreground">Quantidade atual:</p>
+                <p className="text-lg font-semibold">
+                  {(adjustingProduct?.current_quantity ?? 0).toFixed(3)} {adjustingProduct?.unit}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="newQuantity">Nova quantidade</Label>
+                <Input
+                  id="newQuantity"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={adjustData.newQuantity}
+                  onChange={(e) => setAdjustData(d => ({ ...d, newQuantity: parseFloat(e.target.value) || 0 }))}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reason">Motivo do ajuste *</Label>
+                <Textarea
+                  id="reason"
+                  value={adjustData.reason}
+                  onChange={(e) => setAdjustData(d => ({ ...d, reason: e.target.value }))}
+                  placeholder="Ex: Contagem física, produto vencido, erro de lançamento..."
+                  required
+                />
+              </div>
+              {adjustingProduct && adjustData.newQuantity !== (adjustingProduct.current_quantity ?? 0) && (
+                <div className={`p-3 rounded-lg ${adjustData.newQuantity > (adjustingProduct.current_quantity ?? 0) ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
+                  <p className="text-sm font-medium">
+                    Diferença: {adjustData.newQuantity > (adjustingProduct.current_quantity ?? 0) ? '+' : ''}
+                    {(adjustData.newQuantity - (adjustingProduct.current_quantity ?? 0)).toFixed(3)} {adjustingProduct.unit}
+                  </p>
+                </div>
+              )}
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={resetAdjustForm}>Cancelar</Button>
+                <Button type="submit" disabled={adjustStockMutation.isPending}>
+                  Confirmar Ajuste
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="border-0 shadow-md">
@@ -287,9 +421,24 @@ export default function Estoque() {
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" onClick={() => handleEdit(product)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
+                          <div className="flex justify-end gap-1">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleAdjustStock(product)}
+                              title="Ajustar estoque"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleEdit(product)}
+                              title="Editar produto"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
