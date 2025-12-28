@@ -224,7 +224,19 @@ export default function Cliente() {
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "UPDATE",
+          schema: "public",
+          table: "orders",
+        },
+        (payload) => {
+          // Immediately refetch when order status changes (especially for cancellations)
+          refetchOrders();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
           schema: "public",
           table: "orders",
         },
