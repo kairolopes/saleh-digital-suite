@@ -637,6 +637,69 @@ export type Database = {
         }
         Relationships: []
       }
+      restaurant_settings: {
+        Row: {
+          accept_reservations: boolean | null
+          address: string | null
+          city: string | null
+          cnpj: string | null
+          created_at: string | null
+          default_order_type: string | null
+          description: string | null
+          email: string | null
+          id: string
+          logo_url: string | null
+          max_tables: number | null
+          name: string
+          operating_hours: Json | null
+          phone: string | null
+          primary_color: string | null
+          state: string | null
+          updated_at: string | null
+          zip_code: string | null
+        }
+        Insert: {
+          accept_reservations?: boolean | null
+          address?: string | null
+          city?: string | null
+          cnpj?: string | null
+          created_at?: string | null
+          default_order_type?: string | null
+          description?: string | null
+          email?: string | null
+          id?: string
+          logo_url?: string | null
+          max_tables?: number | null
+          name?: string
+          operating_hours?: Json | null
+          phone?: string | null
+          primary_color?: string | null
+          state?: string | null
+          updated_at?: string | null
+          zip_code?: string | null
+        }
+        Update: {
+          accept_reservations?: boolean | null
+          address?: string | null
+          city?: string | null
+          cnpj?: string | null
+          created_at?: string | null
+          default_order_type?: string | null
+          description?: string | null
+          email?: string | null
+          id?: string
+          logo_url?: string | null
+          max_tables?: number | null
+          name?: string
+          operating_hours?: Json | null
+          phone?: string | null
+          primary_color?: string | null
+          state?: string | null
+          updated_at?: string | null
+          zip_code?: string | null
+        }
+        Relationships: []
+      }
       stock_movements: {
         Row: {
           created_at: string | null
