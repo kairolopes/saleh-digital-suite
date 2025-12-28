@@ -16,16 +16,88 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Check if this is a forced test run
+    // Check if this is a forced test run or single reservation
     let forceRun = false;
+    let singleReservationId: string | null = null;
     try {
       const body = await req.json();
       forceRun = body?.forceRun === true;
+      singleReservationId = body?.reservationId || null;
     } catch {
       // No body or invalid JSON, that's fine
     }
 
-    console.log(`Starting reservation reminder check... (forceRun: ${forceRun})`);
+    console.log(`Starting reservation reminder check... (forceRun: ${forceRun}, singleReservationId: ${singleReservationId})`);
+
+    // If sending to a single reservation, handle it separately
+    if (singleReservationId) {
+      const { data: settings } = await supabase
+        .from("restaurant_settings")
+        .select("*")
+        .limit(1)
+        .maybeSingle();
+
+      const webhookUrl = settings?.reservation_webhook_url;
+      if (!webhookUrl) {
+        return new Response(
+          JSON.stringify({ error: "No webhook URL configured" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { data: reservation, error: resError } = await supabase
+        .from("reservations")
+        .select("*")
+        .eq("id", singleReservationId)
+        .single();
+
+      if (resError || !reservation) {
+        return new Response(
+          JSON.stringify({ error: "Reservation not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const payload = {
+        action: "reminder",
+        reservation_id: reservation.id,
+        customer_name: reservation.customer_name,
+        customer_phone: reservation.customer_phone,
+        customer_email: reservation.customer_email,
+        table_number: reservation.table_number,
+        party_size: reservation.party_size,
+        reservation_date: reservation.reservation_date,
+        reservation_time: reservation.reservation_time,
+        notes: reservation.notes,
+        restaurant_name: settings?.name || "Restaurante",
+        restaurant_phone: settings?.phone,
+        restaurant_address: settings?.address,
+        reminder_message: `Olá ${reservation.customer_name}! Lembrando da sua reserva em ${reservation.reservation_date} às ${reservation.reservation_time} para ${reservation.party_size} pessoa(s). Mesa ${reservation.table_number}. Esperamos você!`,
+      };
+
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        await supabase
+          .from("reservations")
+          .update({ reminder_sent_at: new Date().toISOString() })
+          .eq("id", reservation.id);
+
+        return new Response(
+          JSON.stringify({ message: "Reminder sent successfully", reservation_id: reservation.id }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } else {
+        return new Response(
+          JSON.stringify({ error: "Failed to send reminder" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
 
     // Get restaurant settings first to check the configured reminder hour
