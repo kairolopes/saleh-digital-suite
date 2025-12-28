@@ -414,17 +414,27 @@ export default function Pedidos() {
                 {activeOrders.map((order) => (
                   <Card
                     key={order.id}
-                    className="cursor-pointer hover:shadow-lg transition-shadow"
+                    className={`cursor-pointer hover:shadow-lg transition-all ${
+                      order.status === "ready" 
+                        ? "ring-2 ring-green-500 animate-pulse shadow-lg shadow-green-500/20" 
+                        : ""
+                    }`}
                     onClick={() => setSelectedOrder(order)}
                   >
                     <CardContent className="p-4">
                       <div className="flex justify-between items-start mb-3">
-                        <div>
+                        <div className="flex items-center gap-2">
                           <span className="font-bold text-lg">
                             #{order.order_number}
                           </span>
+                          {order.status === "ready" && (
+                            <span className="relative flex h-3 w-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                            </span>
+                          )}
                           {order.table_number && (
-                            <Badge variant="outline" className="ml-2">
+                            <Badge variant="outline" className="ml-1">
                               Mesa {order.table_number}
                             </Badge>
                           )}
