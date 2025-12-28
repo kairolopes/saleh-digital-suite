@@ -315,7 +315,7 @@ export default function Reservas() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-5">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -361,6 +361,19 @@ export default function Reservas() {
             <CardContent>
               <div className="text-2xl font-bold text-foreground">
                 {(settings?.max_tables || 20) - (reservationsForDate?.filter((r) => r.status !== 'cancelled').length || 0)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                <Bell className="h-3 w-3" />
+                Lembretes Enviados
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-600">
+                {reservations?.filter((r) => r.reminder_sent_at !== null).length || 0}
               </div>
             </CardContent>
           </Card>
