@@ -28,7 +28,7 @@ import {
   Banknote,
   Smartphone,
   ChefHat,
-  UtensilsCrossed,
+  HandPlatter,
   X,
 } from "lucide-react";
 
@@ -86,6 +86,7 @@ export default function Garcom() {
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [selectedPayment, setSelectedPayment] = useState("");
   const [readyAlert, setReadyAlert] = useState<Order | null>(null);
+  const [waiterCalls, setWaiterCalls] = useState<any[]>([]);
 
   // Audio for notifications
   const playSound = useCallback(() => {
@@ -107,6 +108,21 @@ export default function Garcom() {
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data as Order[];
+    },
+  });
+
+  // Fetch waiter calls
+  const { data: waiterCallsData } = useQuery({
+    queryKey: ["waiter-calls"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("type", "call_waiter")
+        .eq("is_read", false)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data || [];
     },
   });
 
@@ -145,12 +161,40 @@ export default function Garcom() {
           queryClient.invalidateQueries({ queryKey: ["waiter-orders"] });
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: "type=eq.call_waiter" },
+        (payload) => {
+          playSound();
+          queryClient.invalidateQueries({ queryKey: ["waiter-calls"] });
+          const notification = payload.new as any;
+          toast.warning(`Mesa ${notification.data?.table_number || "?"} chamando!`, {
+            description: notification.data?.customer_name || "Cliente precisa de atendimento",
+            duration: 10000,
+          });
+        }
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, [playSound, queryClient]);
+
+  // Dismiss waiter call
+  const dismissCall = useMutation({
+    mutationFn: async (notificationId: string) => {
+      const { error } = await supabase
+        .from("notifications")
+        .update({ is_read: true, read_at: new Date().toISOString() })
+        .eq("id", notificationId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["waiter-calls"] });
+      toast.success("Chamado atendido!");
+    },
+  });
 
   // Deliver order mutation
   const deliverMutation = useMutation({
@@ -217,7 +261,7 @@ export default function Garcom() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-                <UtensilsCrossed className="h-6 w-6 text-primary" />
+                <HandPlatter className="h-6 w-6 text-primary" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold">Garçom</h1>
@@ -262,6 +306,52 @@ export default function Garcom() {
             </div>
           </div>
         </div>
+
+        {/* Waiter Calls Section */}
+        {waiterCallsData && waiterCallsData.length > 0 && (
+          <div className="mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <Bell className="h-6 w-6 text-red-600 animate-bounce" />
+              <h2 className="text-xl font-bold text-red-700">Chamados de Mesa</h2>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {waiterCallsData.map((call: any) => (
+                <Card
+                  key={call.id}
+                  className="border-2 border-red-500 bg-red-50 dark:bg-red-950/30 shadow-lg shadow-red-500/20 animate-pulse"
+                >
+                  <CardContent className="p-6">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-6 w-6 text-red-700" />
+                          <span className="text-3xl font-black text-red-700">
+                            Mesa {call.data?.table_number || "?"}
+                          </span>
+                        </div>
+                        {call.data?.customer_name && (
+                          <p className="text-red-700 flex items-center gap-1 mt-2">
+                            <User className="h-4 w-4" />
+                            {call.data.customer_name}
+                          </p>
+                        )}
+                      </div>
+                      <Badge className="bg-red-600 text-white text-lg px-4 py-1">CHAMANDO</Badge>
+                    </div>
+                    <Button
+                      className="w-full h-14 text-lg font-bold bg-red-600 hover:bg-red-700"
+                      onClick={() => dismissCall.mutate(call.id)}
+                      disabled={dismissCall.isPending}
+                    >
+                      <CheckCircle className="h-6 w-6 mr-2" />
+                      Atender Mesa
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Ready Orders - Priority Section */}
         {readyOrders.length > 0 && (
