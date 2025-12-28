@@ -23,11 +23,20 @@ import {
   Phone,
   User,
   ArrowRight,
-  ArrowLeft,
   MessageSquare,
   HandPlatter,
-  Eye,
-  Pencil
+  Pencil,
+  Receipt,
+  History,
+  ChefHat,
+  Bell,
+  XCircle,
+  Loader2,
+  CreditCard,
+  Banknote,
+  QrCode,
+  Wallet,
+  FileText
 } from "lucide-react";
 import {
   Dialog,
@@ -35,9 +44,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
-import { OrderTracking } from "@/components/OrderTracking";
 
 interface CartItem {
   menuItemId: string;
@@ -63,17 +70,53 @@ interface MenuItem {
   } | null;
 }
 
-type Step = "register" | "menu" | "cart" | "success" | "tracking";
+interface OrderData {
+  id: string;
+  order_number: number;
+  status: string;
+  total: number | null;
+  subtotal: number | null;
+  notes: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  preparing_at: string | null;
+  ready_at: string | null;
+  delivered_at: string | null;
+  order_items?: {
+    id: string;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+    notes: string | null;
+    status: string | null;
+    menu_items?: {
+      recipes?: {
+        name: string;
+      } | null;
+    } | null;
+  }[];
+}
+
+type MainTab = "menu" | "orders" | "bill";
+
+const statusLabels: Record<string, { label: string; color: string; icon: React.ComponentType<any> }> = {
+  pending: { label: "Aguardando", color: "bg-yellow-500", icon: Clock },
+  confirmed: { label: "Confirmado", color: "bg-blue-500", icon: CheckCircle },
+  preparing: { label: "Preparando", color: "bg-orange-500", icon: ChefHat },
+  ready: { label: "Pronto!", color: "bg-green-500", icon: Bell },
+  delivered: { label: "Entregue", color: "bg-gray-500", icon: UtensilsCrossed },
+  cancelled: { label: "Cancelado", color: "bg-red-500", icon: XCircle },
+};
 
 export default function Cliente() {
   const [searchParams] = useSearchParams();
   const tableNumber = searchParams.get("mesa") || "";
   const queryClient = useQueryClient();
 
-  const [step, setStep] = useState<Step>("register");
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [mainTab, setMainTab] = useState<MainTab>("menu");
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [orderNumber, setOrderNumber] = useState<number | null>(null);
-  const [orderId, setOrderId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
@@ -83,15 +126,18 @@ export default function Cliente() {
   const [itemNotes, setItemNotes] = useState("");
   const [callingWaiter, setCallingWaiter] = useState(false);
   const [editingCartItem, setEditingCartItem] = useState<string | null>(null);
+  const [showCart, setShowCart] = useState(false);
+  const [requestingBill, setRequestingBill] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
 
-  // Check if user already registered (localStorage)
+  // Check if user already registered
   useEffect(() => {
     const savedName = localStorage.getItem(`customer_name_${tableNumber}`);
     const savedPhone = localStorage.getItem(`customer_phone_${tableNumber}`);
     if (savedName && savedPhone) {
       setCustomerName(savedName);
       setCustomerPhone(savedPhone);
-      setStep("menu");
+      setIsRegistered(true);
     }
   }, [tableNumber]);
 
@@ -109,8 +155,8 @@ export default function Cliente() {
     },
   });
 
-  // Fetch menu items with recipes
-  const { data: menuItems = [], isLoading } = useQuery({
+  // Fetch menu items
+  const { data: menuItems = [], isLoading: menuLoading } = useQuery({
     queryKey: ["client-menu"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -138,6 +184,60 @@ export default function Cliente() {
     },
   });
 
+  // Fetch customer orders for this table/phone
+  const { data: customerOrders = [], isLoading: ordersLoading, refetch: refetchOrders } = useQuery({
+    queryKey: ["customer-orders", customerPhone, tableNumber],
+    queryFn: async () => {
+      if (!customerPhone) return [];
+      
+      let query = supabase
+        .from("orders")
+        .select(`
+          *,
+          order_items (
+            id, quantity, unit_price, total_price, notes, status,
+            menu_items (recipes (name))
+          )
+        `)
+        .eq("customer_phone", customerPhone)
+        .order("created_at", { ascending: false });
+
+      if (tableNumber) {
+        query = query.eq("table_number", tableNumber);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data as OrderData[];
+    },
+    enabled: !!customerPhone,
+    refetchInterval: 5000,
+  });
+
+  // Realtime subscription for orders
+  useEffect(() => {
+    if (!customerPhone) return;
+
+    const channel = supabase
+      .channel(`customer-orders-${customerPhone}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+        },
+        () => {
+          refetchOrders();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [customerPhone, refetchOrders]);
+
   // Create order mutation
   const createOrder = useMutation({
     mutationFn: async () => {
@@ -146,7 +246,6 @@ export default function Cliente() {
 
       const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-      // Create order
       const { data: order, error: orderError } = await supabase
         .from("orders")
         .insert({
@@ -164,7 +263,6 @@ export default function Cliente() {
 
       if (orderError) throw orderError;
 
-      // Create order items
       const orderItems = cart.map((item) => ({
         order_id: order.id,
         menu_item_id: item.menuItemId,
@@ -184,11 +282,12 @@ export default function Cliente() {
       return order;
     },
     onSuccess: (order) => {
-      setOrderNumber(order.order_number);
-      setOrderId(order.id);
-      setStep("tracking");
+      toast.success(`Pedido #${order.order_number} enviado!`);
       setCart([]);
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      setOrderNotes("");
+      setShowCart(false);
+      setMainTab("orders");
+      queryClient.invalidateQueries({ queryKey: ["customer-orders"] });
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao criar pedido");
@@ -219,11 +318,47 @@ export default function Cliente() {
     },
     onSuccess: () => {
       setCallingWaiter(true);
-      toast.success("Garçom chamado! Aguarde um momento.");
+      toast.success("Garçom chamado! Aguarde.");
       setTimeout(() => setCallingWaiter(false), 30000);
     },
     onError: () => {
-      toast.error("Erro ao chamar garçom. Tente novamente.");
+      toast.error("Erro ao chamar garçom.");
+    },
+  });
+
+  // Request bill mutation
+  const requestBill = useMutation({
+    mutationFn: async () => {
+      if (!selectedPaymentMethod) throw new Error("Selecione uma forma de pagamento");
+      if (!customerPhone || !tableNumber) throw new Error("Dados incompletos");
+
+      const { error } = await supabase
+        .from("notifications")
+        .insert({
+          type: "request_bill",
+          title: `Conta Mesa ${tableNumber}`,
+          message: `${customerName || "Cliente"} solicita conta - ${getPaymentMethodLabel(selectedPaymentMethod)}`,
+          priority: "high",
+          target_roles: ["garcom", "admin"],
+          data: {
+            table_number: tableNumber,
+            customer_name: customerName,
+            customer_phone: customerPhone,
+            payment_method: selectedPaymentMethod,
+            total: billTotal,
+          },
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setRequestingBill(true);
+      toast.success("Conta solicitada! O garçom trará em breve.");
+      setSelectedPaymentMethod(null);
+      setTimeout(() => setRequestingBill(false), 60000);
+    },
+    onError: () => {
+      toast.error("Erro ao solicitar conta.");
     },
   });
 
@@ -241,20 +376,43 @@ export default function Cliente() {
 
   const categories = Object.keys(menuByCategory);
 
+  // Calculate totals
+  const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  // Active orders (not delivered/cancelled)
+  const activeOrders = customerOrders.filter(
+    (o) => !["delivered", "cancelled"].includes(o.status)
+  );
+
+  // Bill total (all orders not cancelled)
+  const billTotal = customerOrders
+    .filter((o) => o.status !== "cancelled")
+    .reduce((sum, o) => sum + (o.total || 0), 0);
+
+  const getPaymentMethodLabel = (method: string) => {
+    const labels: Record<string, string> = {
+      pix: "PIX",
+      credit: "Cartão Crédito",
+      debit: "Cartão Débito",
+      cash: "Dinheiro",
+    };
+    return labels[method] || method;
+  };
+
   const handleRegister = () => {
     if (!customerName.trim()) {
-      toast.error("Por favor, informe seu nome");
+      toast.error("Informe seu nome");
       return;
     }
     if (!customerPhone.trim() || customerPhone.length < 10) {
-      toast.error("Por favor, informe um telefone válido com DDD");
+      toast.error("Informe um telefone válido");
       return;
     }
     
     localStorage.setItem(`customer_name_${tableNumber}`, customerName);
     localStorage.setItem(`customer_phone_${tableNumber}`, customerPhone);
-    
-    setStep("menu");
+    setIsRegistered(true);
   };
 
   const openItemDialog = (item: MenuItem) => {
@@ -282,7 +440,7 @@ export default function Cliente() {
             : c
         )
       );
-      toast.success(`${selectedItem.recipes.name} atualizado no carrinho`);
+      toast.success("Atualizado!");
     } else {
       setCart((prev) => [
         ...prev,
@@ -296,7 +454,7 @@ export default function Cliente() {
           description: selectedItem.recipes.description || undefined,
         },
       ]);
-      toast.success(`${selectedItem.recipes.name} adicionado ao carrinho`);
+      toast.success("Adicionado!");
     }
     setSelectedItem(null);
   };
@@ -330,9 +488,6 @@ export default function Cliente() {
     return item?.quantity || 0;
   };
 
-  const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("pt-BR", {
       style: "currency",
@@ -347,8 +502,14 @@ export default function Cliente() {
     return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`;
   };
 
-  // Step: Register
-  if (step === "register") {
+  const formatTime = (dateStr: string) =>
+    new Date(dateStr).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+  const formatDate = (dateStr: string) =>
+    new Date(dateStr).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+
+  // Register screen
+  if (!isRegistered) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-primary/10 to-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md shadow-xl">
@@ -369,7 +530,7 @@ export default function Cliente() {
           </CardHeader>
           <CardContent className="space-y-6">
             <p className="text-center text-muted-foreground">
-              Para começar seu pedido, por favor informe seus dados:
+              Informe seus dados para começar:
             </p>
             
             <div className="space-y-4">
@@ -383,7 +544,7 @@ export default function Cliente() {
                   placeholder="Digite seu nome"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  className="h-12"
+                  className="h-14 text-lg"
                 />
               </div>
               
@@ -397,17 +558,18 @@ export default function Cliente() {
                   placeholder="(00) 00000-0000"
                   value={formatPhone(customerPhone)}
                   onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, ""))}
-                  className="h-12"
+                  className="h-14 text-lg"
                   maxLength={15}
+                  inputMode="numeric"
                 />
               </div>
             </div>
 
             <Button 
-              className="w-full h-12 text-lg" 
+              className="w-full h-14 text-lg" 
               onClick={handleRegister}
             >
-              Ver Cardápio
+              Começar
               <ArrowRight className="ml-2 w-5 h-5" />
             </Button>
           </CardContent>
@@ -416,240 +578,11 @@ export default function Cliente() {
     );
   }
 
-  // Step: Tracking
-  if (step === "tracking" && orderNumber) {
-    return (
-      <OrderTracking
-        orderNumber={orderNumber}
-        customerName={customerName}
-        tableNumber={tableNumber}
-        onNewOrder={() => {
-          setStep("menu");
-          setOrderNumber(null);
-          setOrderId(null);
-          setOrderNotes("");
-        }}
-        onBack={() => setStep("menu")}
-      />
-    );
-  }
-
-  // Step: Success (fallback)
-  if (step === "success") {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="w-full max-w-md text-center">
-          <CardHeader>
-            <div className="mx-auto w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4 animate-pulse">
-              <CheckCircle className="w-12 h-12 text-green-600" />
-            </div>
-            <CardTitle className="text-2xl">Pedido Enviado!</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-muted-foreground">
-              Seu pedido foi recebido e está sendo analisado pela cozinha.
-            </p>
-            <div className="bg-muted p-6 rounded-lg">
-              <p className="text-sm text-muted-foreground">Número do Pedido</p>
-              <p className="text-4xl font-bold text-primary">#{orderNumber}</p>
-            </div>
-            {tableNumber && (
-              <p className="text-sm text-muted-foreground">
-                Mesa: <span className="font-semibold">{tableNumber}</span>
-              </p>
-            )}
-            <div className="flex flex-col gap-2">
-              <Button
-                className="w-full"
-                onClick={() => setStep("tracking")}
-              >
-                <Eye className="w-4 h-4 mr-2" />
-                Acompanhar Pedido
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => {
-                  setStep("menu");
-                  setOrderNumber(null);
-                  setOrderNotes("");
-                }}
-              >
-                Fazer Novo Pedido
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Step: Cart
-  if (step === "cart") {
-    return (
-      <div className="min-h-screen bg-background">
-        {/* Header */}
-        <header className="sticky top-0 z-40 bg-background border-b">
-          <div className="container max-w-2xl mx-auto px-4 py-4">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" onClick={() => setStep("menu")}>
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
-              <div>
-                <h1 className="font-bold text-lg">Resumo do Pedido</h1>
-                <p className="text-xs text-muted-foreground">{customerName} - Mesa {tableNumber}</p>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <main className="container max-w-2xl mx-auto px-4 py-6 pb-32">
-          {cart.length === 0 ? (
-            <div className="text-center py-12">
-              <ShoppingCart className="mx-auto h-16 w-16 text-muted-foreground/50" />
-              <p className="mt-4 text-muted-foreground">Seu carrinho está vazio</p>
-              <Button className="mt-4" onClick={() => setStep("menu")}>
-                Ver Cardápio
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {cart.map((item) => (
-                <Card key={item.menuItemId} className="overflow-hidden">
-                  <CardContent className="p-0">
-                    <div className="flex">
-                      {item.imageUrl ? (
-                        <img
-                          src={item.imageUrl}
-                          alt={item.name}
-                          className="w-24 h-24 object-cover"
-                        />
-                      ) : (
-                        <div className="w-24 h-24 bg-muted flex items-center justify-center">
-                          <UtensilsCrossed className="w-8 h-8 text-muted-foreground" />
-                        </div>
-                      )}
-                      <div className="flex-1 p-3">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="font-semibold">{item.name}</h3>
-                            <p className="text-primary font-bold">
-                              {formatCurrency(item.price * item.quantity)}
-                            </p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive"
-                            onClick={() => removeFromCart(item.menuItemId)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                        
-                        <div className="flex items-center justify-between mt-2">
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => updateQuantity(item.menuItemId, -1)}
-                            >
-                              <Minus className="w-4 h-4" />
-                            </Button>
-                            <span className="font-medium w-8 text-center">{item.quantity}</span>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => updateQuantity(item.menuItemId, 1)}
-                            >
-                              <Plus className="w-4 h-4" />
-                            </Button>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-xs"
-                            onClick={() => setEditingCartItem(editingCartItem === item.menuItemId ? null : item.menuItemId)}
-                          >
-                            <Pencil className="w-3 h-3 mr-1" />
-                            {item.notes ? "Editar obs." : "Adicionar obs."}
-                          </Button>
-                        </div>
-
-                        {editingCartItem === item.menuItemId && (
-                          <div className="mt-2">
-                            <Input
-                              placeholder="Ex: sem cebola, bem passado..."
-                              value={item.notes}
-                              onChange={(e) => updateItemNotes(item.menuItemId, e.target.value)}
-                              className="text-sm"
-                            />
-                          </div>
-                        )}
-
-                        {item.notes && editingCartItem !== item.menuItemId && (
-                          <p className="text-xs text-muted-foreground mt-2 italic">
-                            "{item.notes}"
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-
-              <Separator />
-
-              <div className="space-y-2">
-                <Label>Observações gerais do pedido</Label>
-                <Textarea
-                  placeholder="Alguma observação adicional?"
-                  value={orderNotes}
-                  onChange={(e) => setOrderNotes(e.target.value)}
-                  rows={3}
-                />
-              </div>
-            </div>
-          )}
-        </main>
-
-        {/* Fixed Bottom */}
-        {cart.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4 shadow-lg">
-            <div className="container max-w-2xl mx-auto">
-              <div className="flex justify-between items-center mb-4">
-                <span className="text-lg font-semibold">Total</span>
-                <span className="text-2xl font-bold text-primary">{formatCurrency(cartTotal)}</span>
-              </div>
-              <Button
-                className="w-full h-14 text-lg"
-                onClick={() => createOrder.mutate()}
-                disabled={createOrder.isPending}
-              >
-                {createOrder.isPending ? (
-                  "Enviando..."
-                ) : (
-                  <>
-                    <Send className="mr-2 w-5 h-5" />
-                    Enviar Pedido
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Step: Menu
   return (
-    <div className="min-h-screen bg-background pb-24">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-background border-b shadow-sm">
-        <div className="container max-w-2xl mx-auto px-4 py-4">
+        <div className="px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {settings?.logo_url ? (
@@ -658,160 +591,550 @@ export default function Cliente() {
                 <UtensilsCrossed className="w-6 h-6 text-primary" />
               )}
               <div>
-                <h1 className="font-bold text-lg">{settings?.name || "Cardápio"}</h1>
+                <h1 className="font-bold">{settings?.name || "Cardápio"}</h1>
                 <p className="text-xs text-muted-foreground">
-                  {customerName} {tableNumber && `• Mesa ${tableNumber}`}
+                  {customerName} • Mesa {tableNumber}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant={callingWaiter ? "secondary" : "outline"}
-                size="sm"
-                onClick={() => callWaiter.mutate()}
-                disabled={callingWaiter || callWaiter.isPending}
-                className={callingWaiter ? "animate-pulse" : ""}
-              >
-                <HandPlatter className="w-4 h-4 mr-1" />
-                {callingWaiter ? "Chamando..." : "Garçom"}
-              </Button>
-            </div>
+            <Button
+              variant={callingWaiter ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => callWaiter.mutate()}
+              disabled={callingWaiter || callWaiter.isPending}
+              className={callingWaiter ? "animate-pulse" : ""}
+            >
+              <HandPlatter className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       </header>
 
-      {/* Category Filter */}
-      <div className="sticky top-[73px] z-30 bg-background border-b">
-        <ScrollArea className="w-full">
-          <div className="container max-w-2xl mx-auto px-4 py-2 flex gap-2">
-            <Button
-              variant={selectedCategory === null ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSelectedCategory(null)}
-            >
-              Todos
-            </Button>
-            {categories.map((cat) => (
-              <Button
-                key={cat}
-                variant={selectedCategory === cat ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSelectedCategory(cat)}
-                className="whitespace-nowrap"
-              >
-                {cat}
-              </Button>
-            ))}
-          </div>
-        </ScrollArea>
-      </div>
+      {/* Main Content */}
+      <main className="flex-1 overflow-auto pb-20">
+        {/* Menu Tab */}
+        {mainTab === "menu" && (
+          <div>
+            {/* Category Filter */}
+            <div className="sticky top-0 z-30 bg-background border-b">
+              <ScrollArea className="w-full">
+                <div className="px-4 py-2 flex gap-2">
+                  <Button
+                    variant={selectedCategory === null ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSelectedCategory(null)}
+                  >
+                    Todos
+                  </Button>
+                  {categories.map((cat) => (
+                    <Button
+                      key={cat}
+                      variant={selectedCategory === cat ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setSelectedCategory(cat)}
+                      className="whitespace-nowrap"
+                    >
+                      {cat}
+                    </Button>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
 
-      {/* Menu Items */}
-      <main className="container max-w-2xl mx-auto px-4 py-6">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+            {/* Menu Items */}
+            <div className="px-4 py-4">
+              {menuLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {(selectedCategory ? [selectedCategory] : categories).map((category) => (
+                    <section key={category}>
+                      <h2 className="text-lg font-bold mb-3">{category}</h2>
+                      <div className="grid gap-3">
+                        {menuByCategory[category]?.map((item) => {
+                          const quantityInCart = getCartItemQuantity(item.id);
+                          return (
+                            <Card
+                              key={item.id}
+                              className={`overflow-hidden cursor-pointer active:scale-[0.98] transition-transform ${
+                                quantityInCart > 0 ? "ring-2 ring-primary" : ""
+                              }`}
+                              onClick={() => openItemDialog(item)}
+                            >
+                              <div className="flex">
+                                {item.recipes?.image_url ? (
+                                  <div className="w-24 h-24 flex-shrink-0 relative">
+                                    <img
+                                      src={item.recipes.image_url}
+                                      alt={item.recipes.name || "Item"}
+                                      className="w-full h-full object-cover"
+                                    />
+                                    {quantityInCart > 0 && (
+                                      <div className="absolute top-1 right-1 bg-primary text-primary-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
+                                        {quantityInCart}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="w-24 h-24 flex-shrink-0 bg-muted flex items-center justify-center relative">
+                                    <UtensilsCrossed className="w-8 h-8 text-muted-foreground" />
+                                    {quantityInCart > 0 && (
+                                      <div className="absolute top-1 right-1 bg-primary text-primary-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
+                                        {quantityInCart}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                <CardContent className="flex-1 p-3">
+                                  <h3 className="font-semibold text-sm">
+                                    {item.recipes?.name || "Item"}
+                                  </h3>
+                                  {item.recipes?.description && (
+                                    <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
+                                      {item.recipes.description}
+                                    </p>
+                                  )}
+                                  <div className="flex items-center justify-between mt-2">
+                                    <span className="text-base font-bold text-primary">
+                                      {formatCurrency(item.sell_price)}
+                                    </span>
+                                    {item.recipes?.preparation_time && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        <Clock className="w-3 h-3 mr-1" />
+                                        {item.recipes.preparation_time}min
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </div>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cart Button */}
+            {cartCount > 0 && !showCart && (
+              <div className="fixed bottom-20 left-4 right-4 z-40">
+                <Button
+                  className="w-full flex items-center justify-between py-6 shadow-xl"
+                  onClick={() => setShowCart(true)}
+                >
+                  <div className="flex items-center gap-2">
+                    <ShoppingCart className="w-5 h-5" />
+                    <span className="font-bold">{cartCount} {cartCount === 1 ? "item" : "itens"}</span>
+                  </div>
+                  <span className="font-bold">{formatCurrency(cartTotal)}</span>
+                </Button>
+              </div>
+            )}
           </div>
-        ) : menuItems.length === 0 ? (
-          <div className="text-center py-12">
-            <UtensilsCrossed className="mx-auto h-12 w-12 text-muted-foreground/50" />
-            <p className="mt-4 text-muted-foreground">
-              Nenhum item disponível no cardápio no momento.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-8">
-            {(selectedCategory ? [selectedCategory] : categories).map((category) => (
-              <section key={category}>
-                <h2 className="text-xl font-bold mb-4 text-foreground">
-                  {category}
-                </h2>
-                <div className="grid gap-3">
-                  {menuByCategory[category]?.map((item) => {
-                    const quantityInCart = getCartItemQuantity(item.id);
-                    return (
-                      <Card
-                        key={item.id}
-                        className={`overflow-hidden transition-all cursor-pointer hover:shadow-md ${
-                          quantityInCart > 0 ? "ring-2 ring-primary" : ""
-                        }`}
-                        onClick={() => openItemDialog(item)}
-                      >
-                        <div className="flex">
-                          {item.recipes?.image_url ? (
-                            <div className="w-28 h-28 flex-shrink-0 relative">
-                              <img
-                                src={item.recipes.image_url}
-                                alt={item.recipes.name || "Item"}
-                                className="w-full h-full object-cover"
-                              />
-                              {quantityInCart > 0 && (
-                                <div className="absolute top-1 right-1 bg-primary text-primary-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
-                                  {quantityInCart}
+        )}
+
+        {/* Orders Tab */}
+        {mainTab === "orders" && (
+          <div className="px-4 py-4 space-y-4">
+            {ordersLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : customerOrders.length === 0 ? (
+              <div className="text-center py-12">
+                <History className="mx-auto h-16 w-16 text-muted-foreground/50" />
+                <p className="mt-4 text-muted-foreground">Nenhum pedido ainda</p>
+                <Button className="mt-4" onClick={() => setMainTab("menu")}>
+                  Ver Cardápio
+                </Button>
+              </div>
+            ) : (
+              <>
+                {/* Active Orders */}
+                {activeOrders.length > 0 && (
+                  <div className="space-y-3">
+                    <h2 className="font-bold text-lg flex items-center gap-2">
+                      <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                      Em andamento
+                    </h2>
+                    {activeOrders.map((order) => {
+                      const status = statusLabels[order.status] || statusLabels.pending;
+                      const StatusIcon = status.icon;
+                      return (
+                        <Card key={order.id} className={`border-2 ${order.status === "ready" ? "border-green-500 bg-green-50 dark:bg-green-950/30" : "border-primary/30"}`}>
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-12 h-12 rounded-full ${status.color} flex items-center justify-center ${order.status === "ready" ? "animate-pulse" : ""}`}>
+                                  <StatusIcon className="w-6 h-6 text-white" />
                                 </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="w-28 h-28 flex-shrink-0 bg-muted flex items-center justify-center relative">
-                              <UtensilsCrossed className="w-8 h-8 text-muted-foreground" />
-                              {quantityInCart > 0 && (
-                                <div className="absolute top-1 right-1 bg-primary text-primary-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
-                                  {quantityInCart}
+                                <div>
+                                  <p className="text-2xl font-black">#{order.order_number}</p>
+                                  <p className="text-sm text-muted-foreground">{formatTime(order.created_at)}</p>
                                 </div>
-                              )}
+                              </div>
+                              <Badge variant={order.status === "ready" ? "default" : "secondary"} className="text-sm">
+                                {status.label}
+                              </Badge>
                             </div>
-                          )}
-                          <CardContent className="flex-1 p-4 flex flex-col justify-between">
-                            <div>
-                              <h3 className="font-semibold text-foreground">
-                                {item.recipes?.name || "Item sem nome"}
-                              </h3>
-                              {item.recipes?.description && (
-                                <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
-                                  {item.recipes.description}
+                            
+                            {order.status === "ready" && (
+                              <div className="bg-green-100 dark:bg-green-900/30 rounded-lg p-3 mb-3 text-center">
+                                <Bell className="w-6 h-6 mx-auto text-green-600 animate-bounce" />
+                                <p className="font-bold text-green-700 dark:text-green-400">Pronto para retirar!</p>
+                              </div>
+                            )}
+
+                            <div className="space-y-1">
+                              {order.order_items?.slice(0, 3).map((item) => (
+                                <p key={item.id} className="text-sm">
+                                  {item.quantity}x {item.menu_items?.recipes?.name || "Item"}
+                                </p>
+                              ))}
+                              {(order.order_items?.length || 0) > 3 && (
+                                <p className="text-xs text-muted-foreground">
+                                  +{(order.order_items?.length || 0) - 3} mais itens
                                 </p>
                               )}
                             </div>
-                            <div className="flex items-center justify-between mt-2">
-                              <span className="text-lg font-bold text-primary">
-                                {formatCurrency(item.sell_price)}
-                              </span>
-                              {item.recipes?.preparation_time && (
-                                <Badge variant="secondary" className="flex items-center gap-1 text-xs">
-                                  <Clock className="w-3 h-3" />
-                                  {item.recipes.preparation_time}min
-                                </Badge>
-                              )}
+                            
+                            <div className="mt-3 pt-3 border-t flex justify-between items-center">
+                              <span className="text-sm text-muted-foreground">Total</span>
+                              <span className="font-bold text-primary">{formatCurrency(order.total || 0)}</span>
                             </div>
                           </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Order History */}
+                {customerOrders.filter((o) => ["delivered", "cancelled"].includes(o.status)).length > 0 && (
+                  <div className="space-y-3">
+                    <h2 className="font-bold text-lg flex items-center gap-2">
+                      <History className="w-5 h-5" />
+                      Histórico
+                    </h2>
+                    {customerOrders
+                      .filter((o) => ["delivered", "cancelled"].includes(o.status))
+                      .map((order) => {
+                        const status = statusLabels[order.status] || statusLabels.pending;
+                        return (
+                          <Card key={order.id} className="opacity-75">
+                            <CardContent className="p-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <div>
+                                  <p className="font-bold">#{order.order_number}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {formatDate(order.created_at)} às {formatTime(order.created_at)}
+                                  </p>
+                                </div>
+                                <Badge variant={order.status === "cancelled" ? "destructive" : "secondary"}>
+                                  {status.label}
+                                </Badge>
+                              </div>
+                              
+                              <div className="space-y-1">
+                                {order.order_items?.map((item) => (
+                                  <p key={item.id} className="text-sm">
+                                    {item.quantity}x {item.menu_items?.recipes?.name || "Item"}
+                                  </p>
+                                ))}
+                              </div>
+                              
+                              {order.status !== "cancelled" && (
+                                <div className="mt-2 pt-2 border-t flex justify-between items-center">
+                                  <span className="text-sm text-muted-foreground">Total</span>
+                                  <span className="font-bold">{formatCurrency(order.total || 0)}</span>
+                                </div>
+                              )}
+
+                              {order.rejection_reason && (
+                                <div className="mt-2 p-2 bg-destructive/10 rounded text-sm text-destructive">
+                                  Motivo: {order.rejection_reason}
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Bill Tab */}
+        {mainTab === "bill" && (
+          <div className="px-4 py-4 space-y-4">
+            {/* Bill Summary */}
+            <Card className="border-2 border-primary/20">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2">
+                  <Receipt className="w-5 h-5" />
+                  Resumo da Conta
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {customerOrders.filter((o) => o.status !== "cancelled").length === 0 ? (
+                  <p className="text-center text-muted-foreground py-4">
+                    Nenhum pedido para pagar
+                  </p>
+                ) : (
+                  <>
+                    {customerOrders
+                      .filter((o) => o.status !== "cancelled")
+                      .map((order) => (
+                        <div key={order.id} className="border-b pb-3 last:border-0 last:pb-0">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-semibold">Pedido #{order.order_number}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {formatTime(order.created_at)}
+                            </Badge>
+                          </div>
+                          {order.order_items?.map((item) => (
+                            <div key={item.id} className="flex justify-between text-sm text-muted-foreground">
+                              <span>{item.quantity}x {item.menu_items?.recipes?.name || "Item"}</span>
+                              <span>{formatCurrency(item.total_price)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between mt-2 font-medium">
+                            <span>Subtotal</span>
+                            <span>{formatCurrency(order.total || 0)}</span>
+                          </div>
                         </div>
-                      </Card>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                      ))}
+
+                    <Separator />
+
+                    <div className="flex justify-between items-center pt-2">
+                      <span className="text-xl font-bold">Total a Pagar</span>
+                      <span className="text-2xl font-black text-primary">{formatCurrency(billTotal)}</span>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Payment Method Selection */}
+            {billTotal > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Wallet className="w-5 h-5" />
+                    Forma de Pagamento
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { id: "pix", label: "PIX", icon: QrCode },
+                      { id: "credit", label: "Crédito", icon: CreditCard },
+                      { id: "debit", label: "Débito", icon: CreditCard },
+                      { id: "cash", label: "Dinheiro", icon: Banknote },
+                    ].map((method) => (
+                      <Button
+                        key={method.id}
+                        variant={selectedPaymentMethod === method.id ? "default" : "outline"}
+                        className={`h-16 flex flex-col gap-1 ${selectedPaymentMethod === method.id ? "" : ""}`}
+                        onClick={() => setSelectedPaymentMethod(method.id)}
+                      >
+                        <method.icon className="w-5 h-5" />
+                        <span className="text-sm">{method.label}</span>
+                      </Button>
+                    ))}
+                  </div>
+
+                  <Button
+                    className="w-full h-14 mt-4 text-lg"
+                    disabled={!selectedPaymentMethod || requestingBill || requestBill.isPending}
+                    onClick={() => requestBill.mutate()}
+                  >
+                    {requestingBill ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        Aguardando Garçom...
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="w-5 h-5 mr-2" />
+                        Solicitar Conta
+                      </>
+                    )}
+                  </Button>
+
+                  {requestingBill && (
+                    <p className="text-center text-sm text-muted-foreground mt-3">
+                      O garçom foi notificado e está vindo!
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </main>
 
-      {/* Fixed Cart Button */}
-      {cartCount > 0 && (
-        <div className="fixed bottom-4 left-4 right-4 z-50">
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-background border-t z-50">
+        <div className="grid grid-cols-3 h-16">
           <Button
-            className="w-full max-w-2xl mx-auto flex items-center justify-between py-6 shadow-xl"
-            onClick={() => setStep("cart")}
+            variant="ghost"
+            className={`h-full rounded-none flex flex-col gap-1 ${mainTab === "menu" ? "text-primary bg-primary/5" : ""}`}
+            onClick={() => { setMainTab("menu"); setShowCart(false); }}
           >
-            <div className="flex items-center gap-2">
-              <div className="bg-primary-foreground/20 rounded-full px-3 py-1">
-                <span className="font-bold">{cartCount}</span>
+            <UtensilsCrossed className="w-5 h-5" />
+            <span className="text-xs">Cardápio</span>
+          </Button>
+          <Button
+            variant="ghost"
+            className={`h-full rounded-none flex flex-col gap-1 relative ${mainTab === "orders" ? "text-primary bg-primary/5" : ""}`}
+            onClick={() => setMainTab("orders")}
+          >
+            <History className="w-5 h-5" />
+            <span className="text-xs">Pedidos</span>
+            {activeOrders.length > 0 && (
+              <div className="absolute top-2 right-1/4 w-5 h-5 bg-primary text-primary-foreground text-xs font-bold rounded-full flex items-center justify-center">
+                {activeOrders.length}
               </div>
-              <span>Ver Carrinho</span>
-            </div>
-            <span className="font-bold text-lg">{formatCurrency(cartTotal)}</span>
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            className={`h-full rounded-none flex flex-col gap-1 ${mainTab === "bill" ? "text-primary bg-primary/5" : ""}`}
+            onClick={() => setMainTab("bill")}
+          >
+            <Receipt className="w-5 h-5" />
+            <span className="text-xs">Conta</span>
           </Button>
         </div>
-      )}
+      </nav>
+
+      {/* Cart Sheet */}
+      <Dialog open={showCart} onOpenChange={setShowCart}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5" />
+              Carrinho ({cartCount})
+            </DialogTitle>
+          </DialogHeader>
+
+          {cart.length === 0 ? (
+            <div className="text-center py-8">
+              <ShoppingCart className="mx-auto h-12 w-12 text-muted-foreground/50" />
+              <p className="mt-2 text-muted-foreground">Carrinho vazio</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {cart.map((item) => (
+                <div key={item.menuItemId} className="flex gap-3 pb-3 border-b">
+                  <div className="flex-1">
+                    <div className="flex justify-between">
+                      <h4 className="font-semibold">{item.name}</h4>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive"
+                        onClick={() => removeFromCart(item.menuItemId)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <p className="text-primary font-bold">{formatCurrency(item.price * item.quantity)}</p>
+                    
+                    <div className="flex items-center gap-2 mt-2">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => updateQuantity(item.menuItemId, -1)}
+                      >
+                        <Minus className="w-4 h-4" />
+                      </Button>
+                      <span className="font-medium w-8 text-center">{item.quantity}</span>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => updateQuantity(item.menuItemId, 1)}
+                      >
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs ml-auto"
+                        onClick={() => setEditingCartItem(editingCartItem === item.menuItemId ? null : item.menuItemId)}
+                      >
+                        <Pencil className="w-3 h-3 mr-1" />
+                        Obs.
+                      </Button>
+                    </div>
+
+                    {editingCartItem === item.menuItemId && (
+                      <Input
+                        placeholder="Observações..."
+                        value={item.notes}
+                        onChange={(e) => updateItemNotes(item.menuItemId, e.target.value)}
+                        className="mt-2 text-sm"
+                      />
+                    )}
+
+                    {item.notes && editingCartItem !== item.menuItemId && (
+                      <p className="text-xs text-muted-foreground mt-1 italic">"{item.notes}"</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  Observações do pedido
+                </Label>
+                <Textarea
+                  placeholder="Observações gerais..."
+                  value={orderNotes}
+                  onChange={(e) => setOrderNotes(e.target.value)}
+                  rows={2}
+                />
+              </div>
+
+              <Separator />
+
+              <div className="flex justify-between items-center text-lg">
+                <span className="font-semibold">Total</span>
+                <span className="font-bold text-primary">{formatCurrency(cartTotal)}</span>
+              </div>
+
+              <Button
+                className="w-full h-14 text-lg"
+                onClick={() => createOrder.mutate()}
+                disabled={createOrder.isPending}
+              >
+                {createOrder.isPending ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Enviando...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-5 h-5 mr-2" />
+                    Enviar Pedido
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Item Detail Dialog */}
       <Dialog open={!!selectedItem} onOpenChange={(open) => !open && setSelectedItem(null)}>
@@ -823,32 +1146,32 @@ export default function Cliente() {
                   <img
                     src={selectedItem.recipes.image_url}
                     alt={selectedItem.recipes.name}
-                    className="w-full h-56 object-cover"
+                    className="w-full h-48 object-cover"
                   />
                   {selectedItem.recipes.preparation_time && (
-                    <Badge className="absolute bottom-3 left-3 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
+                    <Badge className="absolute bottom-3 left-3">
+                      <Clock className="w-3 h-3 mr-1" />
                       {selectedItem.recipes.preparation_time} min
                     </Badge>
                   )}
                 </div>
               ) : (
-                <div className="w-full h-32 bg-muted flex items-center justify-center">
-                  <UtensilsCrossed className="w-12 h-12 text-muted-foreground" />
+                <div className="w-full h-24 bg-muted flex items-center justify-center">
+                  <UtensilsCrossed className="w-10 h-10 text-muted-foreground" />
                 </div>
               )}
               
-              <div className="p-6 space-y-4">
+              <div className="p-5 space-y-4">
                 <DialogHeader>
-                  <DialogTitle className="text-2xl">{selectedItem.recipes.name}</DialogTitle>
+                  <DialogTitle className="text-xl">{selectedItem.recipes.name}</DialogTitle>
                   {selectedItem.recipes.description && (
-                    <DialogDescription className="text-base text-muted-foreground">
+                    <DialogDescription className="text-base">
                       {selectedItem.recipes.description}
                     </DialogDescription>
                   )}
                 </DialogHeader>
 
-                <div className="text-3xl font-bold text-primary">
+                <div className="text-2xl font-bold text-primary">
                   {formatCurrency(selectedItem.sell_price)}
                 </div>
 
@@ -858,11 +1181,10 @@ export default function Cliente() {
                     Observações
                   </Label>
                   <Textarea
-                    placeholder="Ex: sem cebola, bem passado, ponto da carne..."
+                    placeholder="Ex: sem cebola, bem passado..."
                     value={itemNotes}
                     onChange={(e) => setItemNotes(e.target.value)}
                     rows={2}
-                    className="resize-none"
                   />
                 </div>
 
@@ -870,23 +1192,23 @@ export default function Cliente() {
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-14 w-14 rounded-full"
+                    className="h-12 w-12 rounded-full"
                     onClick={() => setItemQuantity(Math.max(1, itemQuantity - 1))}
                   >
-                    <Minus className="w-6 h-6" />
+                    <Minus className="w-5 h-5" />
                   </Button>
-                  <span className="text-3xl font-bold w-12 text-center">{itemQuantity}</span>
+                  <span className="text-2xl font-bold w-10 text-center">{itemQuantity}</span>
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-14 w-14 rounded-full"
+                    className="h-12 w-12 rounded-full"
                     onClick={() => setItemQuantity(itemQuantity + 1)}
                   >
-                    <Plus className="w-6 h-6" />
+                    <Plus className="w-5 h-5" />
                   </Button>
                 </div>
 
-                <Button className="w-full h-14 text-lg" onClick={addToCartFromDialog}>
+                <Button className="w-full h-12 text-lg" onClick={addToCartFromDialog}>
                   {cart.some((c) => c.menuItemId === selectedItem.id) ? (
                     <>Atualizar • {formatCurrency(selectedItem.sell_price * itemQuantity)}</>
                   ) : (
