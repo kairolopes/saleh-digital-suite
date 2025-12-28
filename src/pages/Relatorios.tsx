@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -26,14 +26,29 @@ import { toast } from "sonner";
 import {
   BarChart3,
   Download,
-  FileSpreadsheet,
   TrendingUp,
   Package,
   DollarSign,
-  Calendar,
 } from "lucide-react";
-import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, parseISO, eachDayOfInterval } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+  AreaChart,
+  Area,
+} from "recharts";
+
+const COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff7300", "#0088fe", "#00C49F", "#FFBB28", "#FF8042"];
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
@@ -170,6 +185,17 @@ export default function Relatorios() {
         .map(([category, data]) => ({ category, ...data }))
         .sort((a, b) => b.revenue - a.revenue);
 
+      // Sales by day for chart
+      const salesByDay: Record<string, number> = {};
+      orders?.forEach((order) => {
+        const day = format(new Date(order.created_at), "dd/MM");
+        salesByDay[day] = (salesByDay[day] || 0) + (order.total || 0);
+      });
+
+      const dailySales = Object.entries(salesByDay)
+        .map(([date, value]) => ({ date, value }))
+        .reverse();
+
       return {
         orders: orders || [],
         totalRevenue,
@@ -177,6 +203,7 @@ export default function Relatorios() {
         avgTicket,
         topProducts,
         salesByCategory,
+        dailySales,
       };
     },
   });
@@ -443,7 +470,69 @@ export default function Relatorios() {
               </Card>
             </div>
 
-            {/* Top Products */}
+            {/* Sales Charts */}
+            <div className="grid md:grid-cols-2 gap-4">
+              {/* Daily Sales Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Vendas por Dia</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={salesReport?.dailySales || []}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" fontSize={12} />
+                        <YAxis fontSize={12} tickFormatter={(v) => `R$${v}`} />
+                        <Tooltip
+                          formatter={(value: number) => [formatCurrency(value), "Vendas"]}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="value"
+                          stroke="#8884d8"
+                          fill="#8884d8"
+                          fillOpacity={0.3}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Category Pie Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Vendas por Categoria</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={salesReport?.salesByCategory || []}
+                          dataKey="revenue"
+                          nameKey="category"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={100}
+                          label={({ category, percent }) =>
+                            `${category} (${(percent * 100).toFixed(0)}%)`
+                          }
+                        >
+                          {salesReport?.salesByCategory?.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Top Products Bar Chart */}
             <Card>
               <CardHeader>
                 <CardTitle>Top 10 Produtos Mais Vendidos</CardTitle>
@@ -452,26 +541,21 @@ export default function Relatorios() {
                 {loadingSales ? (
                   <p className="text-center py-4">Carregando...</p>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Produto</TableHead>
-                        <TableHead className="text-right">Quantidade</TableHead>
-                        <TableHead className="text-right">Receita</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {salesReport?.topProducts?.map((product, i) => (
-                        <TableRow key={i}>
-                          <TableCell className="font-medium">{product.name}</TableCell>
-                          <TableCell className="text-right">{product.quantity}</TableCell>
-                          <TableCell className="text-right">
-                            {formatCurrency(product.revenue)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <div className="h-[350px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={salesReport?.topProducts || []}
+                        layout="vertical"
+                        margin={{ left: 100 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" tickFormatter={(v) => `R$${v}`} />
+                        <YAxis type="category" dataKey="name" fontSize={12} width={100} />
+                        <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                        <Bar dataKey="revenue" fill="#82ca9d" name="Receita" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -566,6 +650,38 @@ export default function Relatorios() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Low Stock Bar Chart */}
+            {stockReport?.lowStock && stockReport.lowStock.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Produtos com Estoque Baixo</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={stockReport.lowStock.slice(0, 10).map((p: any) => ({
+                          name: p.name,
+                          atual: p.current_quantity,
+                          minimo: p.min_quantity,
+                        }))}
+                        layout="vertical"
+                        margin={{ left: 100 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" />
+                        <YAxis type="category" dataKey="name" fontSize={12} width={100} />
+                        <Tooltip />
+                        <Legend />
+                        <Bar dataKey="atual" fill="#ef4444" name="Atual" />
+                        <Bar dataKey="minimo" fill="#fbbf24" name="Mínimo" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Stock Table */}
             <Card>
@@ -677,11 +793,104 @@ export default function Relatorios() {
               </Card>
             </div>
 
-            {/* Income by Category */}
+            {/* Financial Charts */}
             <div className="grid md:grid-cols-2 gap-4">
+              {/* Income Pie Chart */}
               <Card>
                 <CardHeader>
                   <CardTitle>Receitas por Categoria</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={financialReport?.incomeByCategory || []}
+                          dataKey="amount"
+                          nameKey="category"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={80}
+                          label={({ category }) => category}
+                        >
+                          {financialReport?.incomeByCategory?.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Expenses Pie Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Despesas por Categoria</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={financialReport?.expensesByCategory || []}
+                          dataKey="amount"
+                          nameKey="category"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={80}
+                          label={({ category }) => category}
+                        >
+                          {financialReport?.expensesByCategory?.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[(index + 4) % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Income vs Expenses Comparison */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Comparativo Receitas x Despesas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={[
+                        {
+                          name: "Período Selecionado",
+                          receitas: financialReport?.totalIncome || 0,
+                          despesas: financialReport?.totalExpenses || 0,
+                        },
+                      ]}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis tickFormatter={(v) => `R$${v}`} />
+                      <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                      <Legend />
+                      <Bar dataKey="receitas" fill="#22c55e" name="Receitas" />
+                      <Bar dataKey="despesas" fill="#ef4444" name="Despesas" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Category Tables */}
+            <div className="grid md:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Detalhamento Receitas</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <Table>
@@ -709,7 +918,7 @@ export default function Relatorios() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Despesas por Categoria</CardTitle>
+                  <CardTitle>Detalhamento Despesas</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <Table>
