@@ -1,1 +1,41 @@
 project_id = "flsuimpkucvvzsrycfmc"
+
+# Webhooks públicos para integração com WhatsApp/plataformas externas
+[functions.webhook-menu]
+verify_jwt = false
+
+[functions.webhook-order-create]
+verify_jwt = false
+
+[functions.webhook-order-status]
+verify_jwt = false
+
+[functions.webhook-order-add-items]
+verify_jwt = false
+
+[functions.webhook-call-waiter]
+verify_jwt = false
+
+[functions.webhook-complaint]
+verify_jwt = false
+
+[functions.webhook-suggestion]
+verify_jwt = false
+
+[functions.webhook-rating]
+verify_jwt = false
+
+[functions.webhook-request-bill]
+verify_jwt = false
+
+[functions.webhook-question]
+verify_jwt = false
+
+[functions.webhook-cancel-order]
+verify_jwt = false
+
+[functions.webhook-menu-recommendations]
+verify_jwt = false
+
+[functions.webhook-table-status]
+verify_jwt = false
