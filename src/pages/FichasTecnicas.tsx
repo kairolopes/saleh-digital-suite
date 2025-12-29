@@ -114,7 +114,10 @@ export default function FichasTecnicas() {
   });
 
   // Fetch subproducts (SP recipes that can be used as ingredients)
-  const subproducts = recipes?.filter((r) => r.recipe_type === "subproduto") || [];
+  // Filter by recipe_type OR name starting with "SP " for backwards compatibility
+  const subproducts = recipes?.filter((r) => 
+    r.recipe_type === "subproduto" || r.name.toUpperCase().startsWith("SP ")
+  ) || [];
 
   // Fetch products (insumos)
   const { data: products } = useQuery({
@@ -968,9 +971,10 @@ export default function FichasTecnicas() {
                         setIngredientType("subrecipe");
                         setCurrentIngredient({ item_id: "", quantity: "", unit: "" });
                       }}
-                      disabled={subproducts.length === 0}
+                      disabled={!recipes || subproducts.length === 0}
+                      title={subproducts.length === 0 ? "Nenhum subproduto cadastrado. Crie um item marcado como 'É Subproduto (SP)' primeiro." : ""}
                     >
-                      Subproduto (SP)
+                      Subproduto (SP) {subproducts.length > 0 && `(${subproducts.length})`}
                     </Button>
                   </div>
 
