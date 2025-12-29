@@ -54,6 +54,8 @@ export default function Estoque() {
     unit: 'kg',
     min_quantity: 0,
   });
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
   const [adjustData, setAdjustData] = useState({
     newQuantity: 0,
     reason: '',
@@ -258,6 +260,18 @@ export default function Estoque() {
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const totalPages = Math.ceil((filteredProducts?.length || 0) / itemsPerPage);
+  const paginatedProducts = filteredProducts?.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  // Reset to page 1 when search changes
+  const handleSearch = (value: string) => {
+    setSearchTerm(value);
+    setCurrentPage(1);
+  };
+
   const lowStockProducts = products?.filter(p => (p.current_quantity ?? 0) <= (p.min_quantity ?? 0)) || [];
   const totalValue = products?.reduce((sum, p) => sum + ((p.current_quantity ?? 0) * (p.average_price ?? 0)), 0) || 0;
 
@@ -430,7 +444,7 @@ export default function Estoque() {
                 <Input
                   placeholder="Buscar produto..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => handleSearch(e.target.value)}
                   className="pl-9"
                 />
               </div>
@@ -444,8 +458,9 @@ export default function Estoque() {
                 {searchTerm ? 'Nenhum produto encontrado' : 'Nenhum produto cadastrado. Clique em "Novo Produto" para começar.'}
               </p>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
+              <div className="space-y-4">
+                <div className="overflow-x-auto">
+                  <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Nome</TableHead>
@@ -457,7 +472,7 @@ export default function Estoque() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredProducts?.map((product) => (
+                    {paginatedProducts?.map((product) => (
                       <TableRow key={product.id}>
                         <TableCell className="font-medium">{product.name}</TableCell>
                         <TableCell>
@@ -524,8 +539,61 @@ export default function Estoque() {
                         </TableCell>
                       </TableRow>
                     ))}
-                  </TableBody>
-                </Table>
+                    </TableBody>
+                  </Table>
+                </div>
+                
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-4 border-t">
+                    <p className="text-sm text-muted-foreground">
+                      Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredProducts?.length || 0)} de {filteredProducts?.length || 0} produtos
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Anterior
+                      </Button>
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                          let page: number;
+                          if (totalPages <= 5) {
+                            page = i + 1;
+                          } else if (currentPage <= 3) {
+                            page = i + 1;
+                          } else if (currentPage >= totalPages - 2) {
+                            page = totalPages - 4 + i;
+                          } else {
+                            page = currentPage - 2 + i;
+                          }
+                          return (
+                            <Button
+                              key={page}
+                              variant={currentPage === page ? "default" : "outline"}
+                              size="sm"
+                              className="w-8 h-8 p-0"
+                              onClick={() => setCurrentPage(page)}
+                            >
+                              {page}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Próximo
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
