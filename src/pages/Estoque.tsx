@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Pencil, Package, AlertTriangle, TrendingUp, Search, RefreshCw } from 'lucide-react';
+import { Plus, Pencil, Package, AlertTriangle, TrendingUp, Search, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { z } from 'zod';
 
 const productSchema = z.object({
@@ -137,6 +138,57 @@ export default function Estoque() {
     },
     onError: (error) => {
       toast({ title: 'Erro ao ajustar estoque', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      // First check if product is used in recipe_items
+      const { data: recipeItems } = await supabase
+        .from('recipe_items')
+        .select('id')
+        .eq('product_id', id)
+        .limit(1);
+      
+      if (recipeItems && recipeItems.length > 0) {
+        // Deactivate instead of delete
+        const { error } = await supabase
+          .from('products')
+          .update({ is_active: false })
+          .eq('id', id);
+        if (error) throw error;
+        return { deactivated: true };
+      }
+
+      // Try to delete
+      const { error } = await supabase.from('products').delete().eq('id', id);
+      if (error) {
+        if (error.code === '23503') {
+          // Foreign key constraint - deactivate instead
+          const { error: updateError } = await supabase
+            .from('products')
+            .update({ is_active: false })
+            .eq('id', id);
+          if (updateError) throw updateError;
+          return { deactivated: true };
+        }
+        throw error;
+      }
+      return { deactivated: false };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      if (result?.deactivated) {
+        toast({ 
+          title: 'Produto desativado', 
+          description: 'O produto está vinculado a receitas e foi desativado.' 
+        });
+      } else {
+        toast({ title: 'Produto excluído com sucesso!' });
+      }
+    },
+    onError: (error) => {
+      toast({ title: 'Erro ao excluir produto', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -438,6 +490,36 @@ export default function Estoque() {
                             >
                               <Pencil className="h-4 w-4" />
                             </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon"
+                                  title="Excluir produto"
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Excluir produto?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Tem certeza que deseja excluir "{product.name}"? 
+                                    Se estiver vinculado a receitas, será desativado em vez de excluído.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                  <AlertDialogAction 
+                                    onClick={() => deleteMutation.mutate(product.id)}
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  >
+                                    Excluir
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </div>
                         </TableCell>
                       </TableRow>
