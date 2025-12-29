@@ -298,9 +298,19 @@ export default function Garcom() {
     },
   });
 
-  // Close order mutation (payment and financial entry)
+  // Close order mutation (payment and financial entry) - supports multiple orders for same table
   const closeOrderMutation = useMutation({
-    mutationFn: async ({ orderId, paymentMethod }: { orderId: string; paymentMethod: string }) => {
+    mutationFn: async ({ tableNumber, paymentMethod, totalAmount }: { tableNumber: string | null; paymentMethod: string; totalAmount: number }) => {
+      // Find all delivered orders for this table
+      const tableOrders = orders?.filter(o => 
+        o.status === "delivered" && 
+        (tableNumber ? o.table_number === tableNumber : o.id === paymentOrder?.id)
+      ) || [];
+
+      if (tableOrders.length === 0) throw new Error("Nenhum pedido encontrado");
+
+      // Update all orders to paid
+      const orderIds = tableOrders.map(o => o.id);
       const { error } = await supabase
         .from("orders")
         .update({
@@ -308,21 +318,19 @@ export default function Garcom() {
           payment_method: paymentMethod,
           paid_at: new Date().toISOString(),
         })
-        .eq("id", orderId);
+        .in("id", orderIds);
       if (error) throw error;
 
-      // Create financial entry
-      const order = orders?.find((o) => o.id === orderId);
-      if (order) {
-        await supabase.from("financial_entries").insert({
-          entry_type: "receita",
-          category: "vendas",
-          amount: order.total || 0,
-          description: `Pedido #${order.order_number} - ${paymentMethod.toUpperCase()}`,
-          reference_type: "pedido",
-          reference_id: orderId,
-        });
-      }
+      // Create single financial entry for the combined total
+      const orderNumbers = tableOrders.map(o => `#${o.order_number}`).join(", ");
+      await supabase.from("financial_entries").insert({
+        entry_type: "receita",
+        category: "vendas",
+        amount: totalAmount,
+        description: `Pedidos ${orderNumbers} - Mesa ${tableNumber || "S/N"} - ${paymentMethod.toUpperCase()}`,
+        reference_type: "pedido",
+        reference_id: tableOrders[0].id,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["waiter-orders"] });
@@ -420,6 +428,31 @@ export default function Garcom() {
   const preparingOrders = orders?.filter((o) => o.status === "preparing") || [];
   const pendingOrders = orders?.filter((o) => ["pending", "confirmed"].includes(o.status)) || [];
 
+  // Group delivered orders by table for consolidated bill view
+  const groupedDeliveredOrders = deliveredOrders.reduce((acc, order) => {
+    const key = order.table_number || `no-table-${order.id}`;
+    if (!acc[key]) {
+      acc[key] = {
+        table_number: order.table_number,
+        customer_name: order.customer_name,
+        customer_phone: order.customer_phone,
+        orders: [],
+        total: 0,
+        allItems: [] as OrderItem[],
+        orderNumbers: [] as number[],
+      };
+    }
+    acc[key].orders.push(order);
+    acc[key].total += order.total || 0;
+    acc[key].orderNumbers.push(order.order_number);
+    if (order.order_items) {
+      acc[key].allItems.push(...order.order_items);
+    }
+    return acc;
+  }, {} as Record<string, { table_number: string | null; customer_name: string | null; customer_phone: string | null; orders: Order[]; total: number; allItems: OrderItem[]; orderNumbers: number[] }>);
+
+  const tableGroups = Object.values(groupedDeliveredOrders);
+
   const groupedMenuItems = menuItems?.reduce((acc, item) => {
     if (!acc[item.category]) acc[item.category] = [];
     acc[item.category].push(item);
@@ -490,13 +523,21 @@ export default function Garcom() {
       }
       // Format payment method string for split payment
       const paymentMethodStr = paymentSplits.map(p => `${p.method}:${p.amount.toFixed(2)}`).join("|");
-      closeOrderMutation.mutate({ orderId: paymentOrder.id, paymentMethod: paymentMethodStr });
+      closeOrderMutation.mutate({ 
+        tableNumber: paymentOrder.table_number, 
+        paymentMethod: paymentMethodStr,
+        totalAmount: paymentOrder.total || 0
+      });
     } else {
       if (!singlePaymentMethod) {
         toast.error("Selecione a forma de pagamento");
         return;
       }
-      closeOrderMutation.mutate({ orderId: paymentOrder.id, paymentMethod: singlePaymentMethod });
+      closeOrderMutation.mutate({ 
+        tableNumber: paymentOrder.table_number, 
+        paymentMethod: singlePaymentMethod,
+        totalAmount: paymentOrder.total || 0
+      });
     }
   };
 
@@ -709,54 +750,74 @@ export default function Garcom() {
           </div>
         )}
 
-        {/* Delivered Orders - Awaiting Payment */}
-        {deliveredOrders.length > 0 && (
+        {/* Delivered Orders - Awaiting Payment (Grouped by Table) */}
+        {tableGroups.length > 0 && (
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-4">
               <CreditCard className="h-6 w-6 text-purple-600" />
               <h2 className="text-xl font-bold text-purple-700">Aguardando Pagamento</h2>
             </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {deliveredOrders.map((order) => (
+              {tableGroups.map((group) => (
                 <Card
-                  key={order.id}
+                  key={group.table_number || group.orders[0]?.id}
                   className="cursor-pointer border-2 border-purple-400 bg-purple-50 dark:bg-purple-950/30 hover:shadow-lg transition-all"
-                  onClick={() => setSelectedOrder(order)}
+                  onClick={() => setSelectedOrder(group.orders[0])}
                 >
                   <CardContent className="p-6">
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-3xl font-black text-purple-700">
-                            #{order.order_number}
-                          </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {group.orderNumbers.map((num, idx) => (
+                            <span key={num} className="text-xl font-black text-purple-700">
+                              #{num}{idx < group.orderNumbers.length - 1 ? "," : ""}
+                            </span>
+                          ))}
                         </div>
-                        {order.table_number && (
+                        {group.table_number && (
                           <div className="flex items-center gap-1 mt-1 text-purple-700">
                             <MapPin className="h-4 w-4" />
-                            <span className="font-bold text-lg">Mesa {order.table_number}</span>
+                            <span className="font-bold text-lg">Mesa {group.table_number}</span>
                           </div>
                         )}
                       </div>
                       <Badge className="bg-purple-600 text-white text-lg px-4 py-1">Entregue</Badge>
                     </div>
                     <div className="flex items-center justify-between mb-3">
-                      {order.customer_name && (
+                      {group.customer_name && (
                         <div className="flex items-center gap-2 text-purple-800">
                           <User className="h-5 w-5" />
-                          <span className="font-semibold text-lg">{order.customer_name}</span>
+                          <span className="font-semibold text-lg">{group.customer_name}</span>
                         </div>
                       )}
                     </div>
+                    {group.orders.length > 1 && (
+                      <p className="text-sm text-purple-600 mb-2">
+                        {group.orders.length} pedidos nesta comanda
+                      </p>
+                    )}
+                    <div className="space-y-1 mb-4 max-h-32 overflow-y-auto">
+                      {group.allItems.map((item) => (
+                        <p key={item.id} className="text-purple-800 text-sm">
+                          {item.quantity}x {item.menu_items?.recipes?.name}
+                        </p>
+                      ))}
+                    </div>
                     <div className="text-center mb-4">
                       <p className="text-muted-foreground text-sm">Total</p>
-                      <p className="text-3xl font-bold text-purple-700">{formatCurrency(order.total || 0)}</p>
+                      <p className="text-3xl font-bold text-purple-700">{formatCurrency(group.total)}</p>
                     </div>
                     <Button
                       className="w-full h-14 text-lg font-bold bg-purple-600 hover:bg-purple-700"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setPaymentOrder(order);
+                        // Create a virtual combined order for payment
+                        const combinedOrder: Order = {
+                          ...group.orders[0],
+                          total: group.total,
+                          order_items: group.allItems,
+                        };
+                        setPaymentOrder(combinedOrder);
                       }}
                     >
                       <CreditCard className="h-6 w-6 mr-2" />
