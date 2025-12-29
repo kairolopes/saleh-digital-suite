@@ -367,18 +367,47 @@ export default function FichasTecnicas() {
   // Delete recipe mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      // First try to delete recipe_items
       await supabase.from("recipe_items").delete().eq("recipe_id", id);
-      await supabase.from("menu_items").delete().eq("recipe_id", id);
-      const { error } = await supabase.from("recipes").delete().eq("id", id);
-      if (error) throw error;
+      
+      // Try to delete menu_items - may fail if referenced by order_items
+      const { error: menuError } = await supabase.from("menu_items").delete().eq("recipe_id", id);
+      
+      if (menuError && menuError.code === "23503") {
+        // Foreign key constraint - menu item is referenced by orders
+        // Deactivate the recipe and menu item instead
+        await supabase.from("menu_items").update({ is_available: false }).eq("recipe_id", id);
+        await supabase.from("recipes").update({ is_available: false }).eq("id", id);
+        return { deactivated: true };
+      }
+      
+      // If menu_items deleted successfully, try to delete recipe
+      const { error: recipeError } = await supabase.from("recipes").delete().eq("id", id);
+      
+      if (recipeError && recipeError.code === "23503") {
+        // Recipe is referenced elsewhere - deactivate instead
+        await supabase.from("recipes").update({ is_available: false }).eq("id", id);
+        return { deactivated: true };
+      }
+      
+      if (recipeError) throw recipeError;
+      return { deactivated: false };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["recipes"] });
       queryClient.invalidateQueries({ queryKey: ["all-recipe-items"] });
       queryClient.invalidateQueries({ queryKey: ["menu-items"] });
-      toast({ title: "Ficha técnica excluída!" });
+      if (result?.deactivated) {
+        toast({ 
+          title: "Ficha técnica desativada", 
+          description: "A ficha está vinculada a pedidos e foi desativada em vez de excluída." 
+        });
+      } else {
+        toast({ title: "Ficha técnica excluída!" });
+      }
     },
-    onError: () => {
+    onError: (error) => {
+      console.error("Delete error:", error);
       toast({ title: "Erro ao excluir ficha técnica", variant: "destructive" });
     },
   });
