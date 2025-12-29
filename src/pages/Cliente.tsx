@@ -128,17 +128,25 @@ export default function Cliente() {
   const [callingWaiter, setCallingWaiter] = useState(false);
   const [editingCartItem, setEditingCartItem] = useState<string | null>(null);
   const [showCart, setShowCart] = useState(false);
-  const [requestingBill, setRequestingBill] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
+  
+  // Persistent bill request state (stored in localStorage to persist across page refreshes)
+  const [billRequested, setBillRequested] = useState(false);
 
-  // Check if user already registered
+  // Check if user already registered and load saved bill request state
   useEffect(() => {
     const savedName = localStorage.getItem(`customer_name_${tableNumber}`);
     const savedPhone = localStorage.getItem(`customer_phone_${tableNumber}`);
+    const savedBillRequest = localStorage.getItem(`bill_requested_${tableNumber}`);
+    
     if (savedName && savedPhone) {
       setCustomerName(savedName);
       setCustomerPhone(savedPhone);
       setIsRegistered(true);
+    }
+    
+    if (savedBillRequest === "true") {
+      setBillRequested(true);
     }
   }, [tableNumber]);
 
@@ -185,7 +193,7 @@ export default function Cliente() {
     },
   });
 
-  // Fetch customer orders for this table/phone
+  // Fetch customer orders for this table/phone (only unpaid orders to avoid showing old history)
   const { data: customerOrders = [], isLoading: ordersLoading, refetch: refetchOrders } = useQuery({
     queryKey: ["customer-orders", customerPhone, tableNumber],
     queryFn: async () => {
@@ -201,6 +209,8 @@ export default function Cliente() {
           )
         `)
         .eq("customer_phone", customerPhone)
+        .is("paid_at", null) // Only fetch unpaid orders
+        .neq("status", "cancelled") // Exclude cancelled orders
         .order("created_at", { ascending: false });
 
       if (tableNumber) {
@@ -214,6 +224,35 @@ export default function Cliente() {
     enabled: !!customerPhone,
     refetchInterval: 5000,
   });
+  
+  // Check if all orders have been paid and reset the session
+  useEffect(() => {
+    const checkIfSessionEnded = async () => {
+      if (!customerPhone || !tableNumber || !isRegistered) return;
+      
+      // Check if there was a bill request and now all orders are paid
+      const savedBillRequest = localStorage.getItem(`bill_requested_${tableNumber}`);
+      if (savedBillRequest !== "true") return;
+      
+      // If bill was requested and no unpaid orders remain, clear the session
+      if (customerOrders.length === 0 && billRequested) {
+        // Wait a bit to confirm the payment went through
+        setTimeout(() => {
+          localStorage.removeItem(`customer_name_${tableNumber}`);
+          localStorage.removeItem(`customer_phone_${tableNumber}`);
+          localStorage.removeItem(`bill_requested_${tableNumber}`);
+          setIsRegistered(false);
+          setCustomerName("");
+          setCustomerPhone("");
+          setBillRequested(false);
+          setCart([]);
+          toast.success("Obrigado pela visita! Volte sempre.");
+        }, 2000);
+      }
+    };
+    
+    checkIfSessionEnded();
+  }, [customerOrders, billRequested, customerPhone, tableNumber, isRegistered]);
 
   // Realtime subscription for orders
   useEffect(() => {
@@ -365,10 +404,10 @@ export default function Cliente() {
       if (error) throw error;
     },
     onSuccess: () => {
-      setRequestingBill(true);
+      setBillRequested(true);
+      localStorage.setItem(`bill_requested_${tableNumber}`, "true");
       toast.success("Conta solicitada! O garçom trará em breve.");
       setSelectedPaymentMethod(null);
-      setTimeout(() => setRequestingBill(false), 60000);
     },
     onError: () => {
       toast.error("Erro ao solicitar conta.");
@@ -829,56 +868,45 @@ export default function Cliente() {
                   </div>
                 )}
 
-                {/* Order History */}
-                {customerOrders.filter((o) => ["delivered", "cancelled"].includes(o.status)).length > 0 && (
+                {/* Delivered Orders (ready for billing) */}
+                {customerOrders.filter((o) => o.status === "delivered").length > 0 && (
                   <div className="space-y-3">
                     <h2 className="font-bold text-lg flex items-center gap-2">
-                      <History className="w-5 h-5" />
-                      Histórico
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      Entregues (na conta)
                     </h2>
                     {customerOrders
-                      .filter((o) => ["delivered", "cancelled"].includes(o.status))
-                      .map((order) => {
-                        const status = statusLabels[order.status] || statusLabels.pending;
-                        return (
-                          <Card key={order.id} className="opacity-75">
-                            <CardContent className="p-4">
-                              <div className="flex items-center justify-between mb-2">
-                                <div>
-                                  <p className="font-bold">#{order.order_number}</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {formatDate(order.created_at)} às {formatTime(order.created_at)}
-                                  </p>
-                                </div>
-                                <Badge variant={order.status === "cancelled" ? "destructive" : "secondary"}>
-                                  {status.label}
-                                </Badge>
+                      .filter((o) => o.status === "delivered")
+                      .map((order) => (
+                        <Card key={order.id} className="border-green-200 bg-green-50/50 dark:bg-green-950/20">
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <div>
+                                <p className="font-bold">#{order.order_number}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatDate(order.created_at)} às {formatTime(order.created_at)}
+                                </p>
                               </div>
-                              
-                              <div className="space-y-1">
-                                {order.order_items?.map((item) => (
-                                  <p key={item.id} className="text-sm">
-                                    {item.quantity}x {item.menu_items?.recipes?.name || "Item"}
-                                  </p>
-                                ))}
-                              </div>
-                              
-                              {order.status !== "cancelled" && (
-                                <div className="mt-2 pt-2 border-t flex justify-between items-center">
-                                  <span className="text-sm text-muted-foreground">Total</span>
-                                  <span className="font-bold">{formatCurrency(order.total || 0)}</span>
-                                </div>
-                              )}
-
-                              {order.rejection_reason && (
-                                <div className="mt-2 p-2 bg-destructive/10 rounded text-sm text-destructive">
-                                  Motivo: {order.rejection_reason}
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
+                              <Badge variant="secondary" className="bg-green-100 text-green-700">
+                                Entregue
+                              </Badge>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              {order.order_items?.map((item) => (
+                                <p key={item.id} className="text-sm">
+                                  {item.quantity}x {item.menu_items?.recipes?.name || "Item"}
+                                </p>
+                              ))}
+                            </div>
+                            
+                            <div className="mt-2 pt-2 border-t flex justify-between items-center">
+                              <span className="text-sm text-muted-foreground">Total</span>
+                              <span className="font-bold">{formatCurrency(order.total || 0)}</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
                   </div>
                 )}
               </>
@@ -967,10 +995,10 @@ export default function Cliente() {
 
                   <Button
                     className="w-full h-14 mt-4 text-lg"
-                    disabled={!selectedPaymentMethod || requestingBill || requestBill.isPending}
+                    disabled={!selectedPaymentMethod || billRequested || requestBill.isPending}
                     onClick={() => requestBill.mutate()}
                   >
-                    {requestingBill ? (
+                    {billRequested ? (
                       <>
                         <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                         Aguardando Garçom...
@@ -983,7 +1011,7 @@ export default function Cliente() {
                     )}
                   </Button>
 
-                  {requestingBill && (
+                  {billRequested && (
                     <p className="text-center text-sm text-muted-foreground mt-3">
                       O garçom foi notificado e está vindo!
                     </p>
