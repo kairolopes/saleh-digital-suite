@@ -54,6 +54,8 @@ interface CartItem {
   notes: string;
   imageUrl?: string;
   description?: string;
+  removedAddons?: string[]; // Names of removed addons for kitchen notes
+  finalPrice: number; // Price after addon adjustments
 }
 
 interface MenuItem {
@@ -67,7 +69,15 @@ interface MenuItem {
     description: string | null;
     image_url: string | null;
     preparation_time: number | null;
+    recipe_type: string;
   } | null;
+}
+
+interface RelatedAddon {
+  subrecipe_id: string;
+  subrecipe_name: string;
+  menu_item_id: string | null;
+  sell_price: number | null;
 }
 
 interface OrderData {
@@ -129,6 +139,8 @@ export default function Cliente() {
   const [editingCartItem, setEditingCartItem] = useState<string | null>(null);
   const [showCart, setShowCart] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
+  const [selectedAddons, setSelectedAddons] = useState<Record<string, boolean>>({});
+  const [relatedAddons, setRelatedAddons] = useState<RelatedAddon[]>([]);
   
   // Persistent bill request state (stored in localStorage to persist across page refreshes)
   const [billRequested, setBillRequested] = useState(false);
@@ -164,7 +176,7 @@ export default function Cliente() {
     },
   });
 
-  // Fetch menu items
+  // Fetch menu items - only main dishes (prato_final)
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
     queryKey: ["client-menu"],
     queryFn: async () => {
@@ -181,7 +193,8 @@ export default function Cliente() {
             name,
             description,
             image_url,
-            preparation_time
+            preparation_time,
+            recipe_type
           )
         `)
         .eq("is_available", true)
@@ -189,7 +202,11 @@ export default function Cliente() {
         .order("display_order");
 
       if (error) throw error;
-      return data as MenuItem[];
+      
+      // Filter only main dishes (prato_final)
+      return (data as MenuItem[]).filter(
+        item => item.recipes?.recipe_type === 'prato_final'
+      );
     },
   });
 
@@ -296,7 +313,7 @@ export default function Cliente() {
       if (cart.length === 0) throw new Error("Carrinho vazio");
       if (!customerPhone) throw new Error("Telefone é obrigatório");
 
-      const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const subtotal = cart.reduce((sum, item) => sum + item.finalPrice * item.quantity, 0);
 
       const { data: order, error: orderError } = await supabase
         .from("orders")
@@ -315,15 +332,24 @@ export default function Cliente() {
 
       if (orderError) throw orderError;
 
-      const orderItems = cart.map((item) => ({
-        order_id: order.id,
-        menu_item_id: item.menuItemId,
-        quantity: item.quantity,
-        unit_price: item.price,
-        total_price: item.price * item.quantity,
-        notes: item.notes || null,
-        status: "pending",
-      }));
+      const orderItems = cart.map((item) => {
+        // Build notes including removed addons
+        let fullNotes = item.notes || "";
+        if (item.removedAddons && item.removedAddons.length > 0) {
+          const removedNote = `SEM: ${item.removedAddons.join(", ")}`;
+          fullNotes = fullNotes ? `${fullNotes} | ${removedNote}` : removedNote;
+        }
+        
+        return {
+          order_id: order.id,
+          menu_item_id: item.menuItemId,
+          quantity: item.quantity,
+          unit_price: item.finalPrice,
+          total_price: item.finalPrice * item.quantity,
+          notes: fullNotes || null,
+          status: "pending",
+        };
+      });
 
       const { error: itemsError } = await supabase
         .from("order_items")
@@ -429,7 +455,7 @@ export default function Cliente() {
   const categories = Object.keys(menuByCategory);
 
   // Calculate totals
-  const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const cartTotal = cart.reduce((sum, item) => sum + item.finalPrice * item.quantity, 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   // Active orders (not delivered/cancelled)
@@ -470,28 +496,136 @@ export default function Cliente() {
     setIsRegistered(true);
   };
 
-  const openItemDialog = (item: MenuItem) => {
+  // Fetch related addons when item is selected
+  const fetchRelatedAddons = async (recipeId: string) => {
+    const { data, error } = await supabase
+      .from("recipe_items")
+      .select(`
+        subrecipe_id,
+        subrecipes:subrecipe_id (
+          id,
+          name,
+          recipe_type
+        )
+      `)
+      .eq("recipe_id", recipeId)
+      .not("subrecipe_id", "is", null);
+
+    if (error || !data) {
+      setRelatedAddons([]);
+      return;
+    }
+
+    // Get menu items for these subrecipes to get prices
+    const subrecipeIds = data.map(d => d.subrecipe_id).filter(Boolean);
+    
+    if (subrecipeIds.length === 0) {
+      setRelatedAddons([]);
+      return;
+    }
+
+    const { data: menuItemsData } = await supabase
+      .from("menu_items")
+      .select("id, recipe_id, sell_price")
+      .in("recipe_id", subrecipeIds);
+
+    const addons: RelatedAddon[] = data
+      .filter(d => d.subrecipes && (d.subrecipes as any).recipe_type === 'subproduto')
+      .map(d => {
+        const subrecipe = d.subrecipes as any;
+        const menuItem = menuItemsData?.find(mi => mi.recipe_id === d.subrecipe_id);
+        return {
+          subrecipe_id: d.subrecipe_id!,
+          subrecipe_name: subrecipe?.name || 'Adicional',
+          menu_item_id: menuItem?.id || null,
+          sell_price: menuItem?.sell_price || null,
+        };
+      });
+
+    setRelatedAddons(addons);
+    
+    // Initialize all addons as selected by default
+    const initialSelected: Record<string, boolean> = {};
+    addons.forEach(addon => {
+      initialSelected[addon.subrecipe_id] = true;
+    });
+    setSelectedAddons(initialSelected);
+  };
+
+  const openItemDialog = async (item: MenuItem) => {
     setSelectedItem(item);
     const existingItem = cart.find((c) => c.menuItemId === item.id);
     if (existingItem) {
       setItemQuantity(existingItem.quantity);
       setItemNotes(existingItem.notes);
+      // Restore addon selections from cart item
+      if (existingItem.removedAddons) {
+        await fetchRelatedAddons(item.recipes!.id);
+        // Mark removed addons as unchecked
+        setTimeout(() => {
+          setSelectedAddons(prev => {
+            const updated = { ...prev };
+            existingItem.removedAddons?.forEach(name => {
+              const addon = relatedAddons.find(a => a.subrecipe_name === name);
+              if (addon) {
+                updated[addon.subrecipe_id] = false;
+              }
+            });
+            return updated;
+          });
+        }, 100);
+      } else {
+        await fetchRelatedAddons(item.recipes!.id);
+      }
     } else {
       setItemQuantity(1);
       setItemNotes("");
+      if (item.recipes?.id) {
+        await fetchRelatedAddons(item.recipes.id);
+      }
     }
+  };
+
+  // Calculate adjusted price based on selected addons
+  const calculateAdjustedPrice = useMemo(() => {
+    if (!selectedItem) return 0;
+    
+    const basePrice = selectedItem.sell_price;
+    let deduction = 0;
+    
+    relatedAddons.forEach(addon => {
+      if (!selectedAddons[addon.subrecipe_id] && addon.sell_price) {
+        deduction += addon.sell_price;
+      }
+    });
+    
+    return Math.max(0, basePrice - deduction);
+  }, [selectedItem, selectedAddons, relatedAddons]);
+
+  const getRemovedAddonNames = (): string[] => {
+    return relatedAddons
+      .filter(addon => !selectedAddons[addon.subrecipe_id])
+      .map(addon => addon.subrecipe_name);
   };
 
   const addToCartFromDialog = () => {
     if (!selectedItem?.recipes) return;
 
+    const removedAddons = getRemovedAddonNames();
+    const finalPrice = calculateAdjustedPrice;
     const existingIndex = cart.findIndex((c) => c.menuItemId === selectedItem.id);
     
     if (existingIndex >= 0) {
       setCart((prev) =>
         prev.map((c, i) =>
           i === existingIndex
-            ? { ...c, quantity: itemQuantity, notes: itemNotes }
+            ? { 
+                ...c, 
+                quantity: itemQuantity, 
+                notes: itemNotes,
+                removedAddons,
+                finalPrice,
+              }
             : c
         )
       );
@@ -507,11 +641,15 @@ export default function Cliente() {
           notes: itemNotes,
           imageUrl: selectedItem.recipes.image_url || undefined,
           description: selectedItem.recipes.description || undefined,
+          removedAddons,
+          finalPrice,
         },
       ]);
       toast.success("Adicionado!");
     }
     setSelectedItem(null);
+    setRelatedAddons([]);
+    setSelectedAddons({});
   };
 
   const updateQuantity = (menuItemId: string, delta: number) => {
@@ -1089,7 +1227,16 @@ export default function Cliente() {
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
-                    <p className="text-primary font-bold">{formatCurrency(item.price * item.quantity)}</p>
+                    <p className="text-primary font-bold">{formatCurrency(item.finalPrice * item.quantity)}</p>
+                    
+                    {/* Show removed addons */}
+                    {item.removedAddons && item.removedAddons.length > 0 && (
+                      <div className="mt-1">
+                        <p className="text-xs text-destructive font-medium">
+                          SEM: {item.removedAddons.join(", ")}
+                        </p>
+                      </div>
+                    )}
                     
                     <div className="flex items-center gap-2 mt-2">
                       <Button
@@ -1179,8 +1326,14 @@ export default function Cliente() {
       </Dialog>
 
       {/* Item Detail Dialog */}
-      <Dialog open={!!selectedItem} onOpenChange={(open) => !open && setSelectedItem(null)}>
-        <DialogContent className="max-w-md p-0 overflow-hidden">
+      <Dialog open={!!selectedItem} onOpenChange={(open) => {
+        if (!open) {
+          setSelectedItem(null);
+          setRelatedAddons([]);
+          setSelectedAddons({});
+        }
+      }}>
+        <DialogContent className="max-w-md p-0 overflow-hidden max-h-[90vh] overflow-y-auto">
           {selectedItem?.recipes && (
             <>
               {selectedItem.recipes.image_url ? (
@@ -1213,9 +1366,77 @@ export default function Cliente() {
                   )}
                 </DialogHeader>
 
-                <div className="text-2xl font-bold text-primary">
-                  {formatCurrency(selectedItem.sell_price)}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Preço base</p>
+                    <p className="text-xl font-bold text-muted-foreground line-through">
+                      {formatCurrency(selectedItem.sell_price)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-muted-foreground">Preço ajustado</p>
+                    <p className="text-2xl font-bold text-primary">
+                      {formatCurrency(calculateAdjustedPrice)}
+                    </p>
+                  </div>
                 </div>
+
+                {/* Related Addons Section */}
+                {relatedAddons.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <UtensilsCrossed className="w-4 h-4 text-muted-foreground" />
+                      <Label className="font-semibold">Itens inclusos</Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Desmarque os itens que não deseja. O valor será deduzido do preço.
+                    </p>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {relatedAddons.map((addon) => (
+                        <div
+                          key={addon.subrecipe_id}
+                          className={`flex items-center justify-between p-3 rounded-lg border transition-colors cursor-pointer ${
+                            selectedAddons[addon.subrecipe_id]
+                              ? "bg-primary/5 border-primary/30"
+                              : "bg-muted/50 border-muted"
+                          }`}
+                          onClick={() => setSelectedAddons(prev => ({
+                            ...prev,
+                            [addon.subrecipe_id]: !prev[addon.subrecipe_id]
+                          }))}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                              selectedAddons[addon.subrecipe_id]
+                                ? "bg-primary border-primary"
+                                : "border-muted-foreground/30"
+                            }`}>
+                              {selectedAddons[addon.subrecipe_id] && (
+                                <CheckCircle className="w-4 h-4 text-primary-foreground" />
+                              )}
+                            </div>
+                            <span className={`font-medium ${
+                              !selectedAddons[addon.subrecipe_id] ? "line-through text-muted-foreground" : ""
+                            }`}>
+                              {addon.subrecipe_name}
+                            </span>
+                          </div>
+                          {addon.sell_price && (
+                            <span className={`text-sm font-semibold ${
+                              selectedAddons[addon.subrecipe_id] 
+                                ? "text-primary" 
+                                : "text-destructive"
+                            }`}>
+                              {selectedAddons[addon.subrecipe_id] ? "+" : "-"}{formatCurrency(addon.sell_price)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <Separator />
 
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
@@ -1252,9 +1473,9 @@ export default function Cliente() {
 
                 <Button className="w-full h-12 text-lg" onClick={addToCartFromDialog}>
                   {cart.some((c) => c.menuItemId === selectedItem.id) ? (
-                    <>Atualizar • {formatCurrency(selectedItem.sell_price * itemQuantity)}</>
+                    <>Atualizar • {formatCurrency(calculateAdjustedPrice * itemQuantity)}</>
                   ) : (
-                    <>Adicionar • {formatCurrency(selectedItem.sell_price * itemQuantity)}</>
+                    <>Adicionar • {formatCurrency(calculateAdjustedPrice * itemQuantity)}</>
                   )}
                 </Button>
               </div>
