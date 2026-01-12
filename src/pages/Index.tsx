@@ -1,10 +1,10 @@
 import { useAuth } from '@/hooks/useAuth';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Package, ShoppingCart, ChefHat, DollarSign, TrendingUp, AlertTriangle, Users, Clock } from 'lucide-react';
+import { Package, ShoppingCart, ChefHat, DollarSign, TrendingUp, AlertTriangle, Users, Clock, Wallet } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend, ComposedChart, Line } from 'recharts';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -164,6 +164,53 @@ export default function Index() {
     }
   });
 
+  // Buscar balanço financeiro (receitas vs despesas) dos últimos 7 dias
+  const { data: financialBalance } = useQuery({
+    queryKey: ['dashboard-financial-balance'],
+    queryFn: async () => {
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const date = subDays(new Date(), i);
+        const dateStr = format(date, 'yyyy-MM-dd');
+        
+        // Buscar receitas do dia
+        const { data: incomeData, error: incomeError } = await supabase
+          .from('financial_entries')
+          .select('amount')
+          .eq('entry_type', 'receita')
+          .eq('entry_date', dateStr);
+        
+        if (incomeError) throw incomeError;
+        
+        // Buscar despesas do dia
+        const { data: expenseData, error: expenseError } = await supabase
+          .from('financial_entries')
+          .select('amount')
+          .eq('entry_type', 'despesa')
+          .eq('entry_date', dateStr);
+        
+        if (expenseError) throw expenseError;
+        
+        const receitas = incomeData?.reduce((acc, e) => acc + (e.amount || 0), 0) || 0;
+        const despesas = expenseData?.reduce((acc, e) => acc + (e.amount || 0), 0) || 0;
+        
+        days.push({
+          day: format(date, 'EEE', { locale: ptBR }),
+          receitas,
+          despesas,
+          lucro: receitas - despesas
+        });
+      }
+      
+      // Calcular totais
+      const totalReceitas = days.reduce((acc, d) => acc + d.receitas, 0);
+      const totalDespesas = days.reduce((acc, d) => acc + d.despesas, 0);
+      const lucroTotal = totalReceitas - totalDespesas;
+      
+      return { days, totalReceitas, totalDespesas, lucroTotal };
+    }
+  });
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
   };
@@ -292,6 +339,77 @@ export default function Index() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Balanço Financeiro - Receitas vs Despesas */}
+        <Card className="border-0 shadow-md">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Wallet className="h-5 w-5 text-primary" />
+                  Balanço Financeiro (Últimos 7 dias)
+                </CardTitle>
+                <CardDescription>Receitas vs Despesas e Lucro</CardDescription>
+              </div>
+              {financialBalance && (
+                <div className="flex gap-4 text-right">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Receitas</p>
+                    <p className="text-sm font-bold text-success">{formatCurrency(financialBalance.totalReceitas)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Despesas</p>
+                    <p className="text-sm font-bold text-destructive">{formatCurrency(financialBalance.totalDespesas)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Lucro</p>
+                    <p className={`text-sm font-bold ${financialBalance.lucroTotal >= 0 ? 'text-success' : 'text-destructive'}`}>
+                      {formatCurrency(financialBalance.lucroTotal)}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {financialBalance?.days && financialBalance.days.some(d => d.receitas > 0 || d.despesas > 0) ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={financialBalance.days}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="day" className="text-xs" />
+                  <YAxis tickFormatter={(v) => `R$${v}`} className="text-xs" />
+                  <Tooltip 
+                    formatter={(value: number, name: string) => [
+                      formatCurrency(value), 
+                      name === 'receitas' ? 'Receitas' : name === 'despesas' ? 'Despesas' : 'Lucro'
+                    ]}
+                    contentStyle={{ 
+                      backgroundColor: 'hsl(var(--card))', 
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px'
+                    }}
+                  />
+                  <Legend 
+                    formatter={(value) => value === 'receitas' ? 'Receitas' : value === 'despesas' ? 'Despesas' : 'Lucro'}
+                  />
+                  <Bar dataKey="receitas" fill="hsl(142 76% 36%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="despesas" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                  <Line 
+                    type="monotone" 
+                    dataKey="lucro" 
+                    stroke="hsl(var(--primary))" 
+                    strokeWidth={2}
+                    dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2, r: 4 }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-muted-foreground text-center py-16">
+                Nenhum lançamento financeiro registrado ainda.
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Second Row */}
         <div className="grid gap-6 md:grid-cols-3">
