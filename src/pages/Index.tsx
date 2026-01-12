@@ -48,8 +48,8 @@ export default function Index() {
       
       const pending = data?.filter(o => o.status === 'pending').length || 0;
       const preparing = data?.filter(o => o.status === 'preparing' || o.status === 'confirmed').length || 0;
-      const completed = data?.filter(o => o.status === 'delivered').length || 0;
-      const totalRevenue = data?.filter(o => o.status === 'delivered').reduce((acc, o) => acc + (o.total || 0), 0) || 0;
+      const completed = data?.filter(o => o.status === 'delivered' || o.status === 'paid').length || 0;
+      const totalRevenue = data?.filter(o => o.status === 'delivered' || o.status === 'paid').reduce((acc, o) => acc + (o.total || 0), 0) || 0;
       
       return {
         total: data?.length || 0,
@@ -70,8 +70,8 @@ export default function Index() {
         const date = subDays(new Date(), i);
         const { data, error } = await supabase
           .from('orders')
-          .select('total')
-          .eq('status', 'delivered')
+          .select('total, status')
+          .in('status', ['delivered', 'paid'])
           .gte('created_at', startOfDay(date).toISOString())
           .lte('created_at', endOfDay(date).toISOString());
         
@@ -181,6 +181,7 @@ export default function Index() {
     preparing: { label: 'Preparando', color: 'bg-purple-100 text-purple-800' },
     ready: { label: 'Pronto', color: 'bg-green-100 text-green-800' },
     delivered: { label: 'Entregue', color: 'bg-gray-100 text-gray-800' },
+    paid: { label: 'Pago', color: 'bg-emerald-100 text-emerald-800' },
     cancelled: { label: 'Cancelado', color: 'bg-red-100 text-red-800' }
   };
 
