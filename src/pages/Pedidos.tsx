@@ -206,14 +206,21 @@ export default function Pedidos() {
       if (status === "paid" && paymentMethod) {
         const order = orders?.find(o => o.id === orderId);
         if (order) {
-          await supabase.from("financial_entries").insert({
-            entry_type: "receita",
-            category: "vendas",
-            amount: order.total || 0,
-            description: `Pedido #${order.order_number} - ${paymentMethod.toUpperCase()}`,
-            reference_type: "pedido",
-            reference_id: orderId,
-          });
+          try {
+            const { error: financialError } = await supabase.from("financial_entries").insert({
+              entry_type: "receita",
+              category: "vendas",
+              amount: order.total || 0,
+              description: `Pedido #${order.order_number} - ${paymentMethod.toUpperCase()}`,
+              reference_type: "pedido",
+              reference_id: orderId,
+            });
+            if (financialError) {
+              console.error("Erro ao criar lançamento financeiro:", financialError);
+            }
+          } catch (err) {
+            console.error("Erro ao criar lançamento financeiro:", err);
+          }
         }
       }
     },

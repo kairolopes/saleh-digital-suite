@@ -323,14 +323,21 @@ export default function Garcom() {
 
       // Create single financial entry for the combined total
       const orderNumbers = tableOrders.map(o => `#${o.order_number}`).join(", ");
-      await supabase.from("financial_entries").insert({
-        entry_type: "receita",
-        category: "vendas",
-        amount: totalAmount,
-        description: `Pedidos ${orderNumbers} - Mesa ${tableNumber || "S/N"} - ${paymentMethod.toUpperCase()}`,
-        reference_type: "pedido",
-        reference_id: tableOrders[0].id,
-      });
+      try {
+        const { error: financialError } = await supabase.from("financial_entries").insert({
+          entry_type: "receita",
+          category: "vendas",
+          amount: totalAmount,
+          description: `Pedidos ${orderNumbers} - Mesa ${tableNumber || "S/N"} - ${paymentMethod.toUpperCase()}`,
+          reference_type: "pedido",
+          reference_id: tableOrders[0].id,
+        });
+        if (financialError) {
+          console.error("Erro ao criar lançamento financeiro:", financialError);
+        }
+      } catch (err) {
+        console.error("Erro ao criar lançamento financeiro:", err);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["waiter-orders"] });

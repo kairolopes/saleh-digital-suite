@@ -145,7 +145,7 @@ export default function Relatorios() {
         `)
         .gte("created_at", dateRange.start)
         .lte("created_at", dateRange.end + "T23:59:59")
-        .in("status", ["delivered", "ready", "completed"])
+        .in("status", ["delivered", "paid"])
         .order("created_at", { ascending: false });
 
       if (error) throw error;
