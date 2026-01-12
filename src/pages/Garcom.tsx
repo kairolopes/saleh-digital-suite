@@ -321,14 +321,26 @@ export default function Garcom() {
         .in("id", orderIds);
       if (error) throw error;
 
-      // Create single financial entry for the combined total
+      // Create single financial entry for the combined total with detailed description
       const orderNumbers = tableOrders.map(o => `#${o.order_number}`).join(", ");
+      const totalItems = tableOrders.reduce((sum, o) => sum + (o.order_items?.length || 0), 0);
+      const allItemNames = tableOrders
+        .flatMap(o => o.order_items?.slice(0, 2).map(i => i.menu_items?.recipes?.name || 'Item') || [])
+        .slice(0, 5);
+      const itemsPreview = allItemNames.join(', ');
+      const moreItems = totalItems > 5 ? ` +${totalItems - 5} itens` : '';
+      const customerInfo = tableOrders[0].customer_name ? ` - ${tableOrders[0].customer_name}` : '';
+      
+      const description = tableOrders.length === 1
+        ? `Pedido ${orderNumbers} - Mesa ${tableNumber || "S/N"}${customerInfo} - ${totalItems} item(ns): ${itemsPreview}${moreItems} - ${paymentMethod.toUpperCase()}`
+        : `Pedidos ${orderNumbers} - Mesa ${tableNumber || "S/N"}${customerInfo} - ${totalItems} item(ns) total - ${paymentMethod.toUpperCase()}`;
+      
       try {
         const { error: financialError } = await supabase.from("financial_entries").insert({
           entry_type: "receita",
           category: "vendas",
           amount: totalAmount,
-          description: `Pedidos ${orderNumbers} - Mesa ${tableNumber || "S/N"} - ${paymentMethod.toUpperCase()}`,
+          description,
           reference_type: "pedido",
           reference_id: tableOrders[0].id,
         });

@@ -207,11 +207,20 @@ export default function Pedidos() {
         const order = orders?.find(o => o.id === orderId);
         if (order) {
           try {
+            // Build detailed description
+            const itemCount = order.order_items?.length || 0;
+            const itemNames = order.order_items?.slice(0, 3).map(i => i.menu_items?.recipes?.name || 'Item').join(', ') || '';
+            const moreItems = itemCount > 3 ? ` +${itemCount - 3} itens` : '';
+            const tableInfo = order.table_number ? `Mesa ${order.table_number}` : order.order_type === 'delivery' ? 'Delivery' : 'Balcão';
+            const customerInfo = order.customer_name ? ` - ${order.customer_name}` : '';
+            
+            const description = `Pedido #${order.order_number} - ${tableInfo}${customerInfo} - ${itemCount} item(ns): ${itemNames}${moreItems} - ${paymentMethod.toUpperCase()}`;
+            
             const { error: financialError } = await supabase.from("financial_entries").insert({
               entry_type: "receita",
               category: "vendas",
               amount: order.total || 0,
-              description: `Pedido #${order.order_number} - ${paymentMethod.toUpperCase()}`,
+              description,
               reference_type: "pedido",
               reference_id: orderId,
             });
