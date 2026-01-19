@@ -866,7 +866,7 @@ export default function FichasTecnicas() {
                               return (
                                 <tr key={item.id} className="border-b border-border/50">
                                   <td className="py-2 text-primary">{name}</td>
-                                  <td className="text-center py-2">{Number(item.quantity).toFixed(2)}</td>
+                                  <td className="text-center py-2">{Number(item.quantity).toFixed(3)}</td>
                                   <td className="text-center py-2">{item.unit}</td>
                                   <td className="text-right py-2">R$ {itemCost.toFixed(2)}</td>
                                 </tr>
@@ -961,7 +961,7 @@ export default function FichasTecnicas() {
                                 const name = product?.name || subrecipe?.name || "N/A";
                                 return (
                                   <div key={item.id} className="truncate">
-                                    • {name} ({Number(item.quantity).toFixed(2)} {item.unit})
+                                    • {name} ({Number(item.quantity).toFixed(3)} {item.unit})
                                   </div>
                                 );
                               })}
