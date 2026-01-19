@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Search, X, Upload, Image as ImageIcon, Clock } from "lucide-react";
 
@@ -77,6 +78,7 @@ const parseDecimal = (value: string): number => {
 
 export default function FichasTecnicas() {
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"pratos" | "subprodutos">("pratos");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [formData, setFormData] = useState<RecipeFormData>({
@@ -571,9 +573,31 @@ export default function FichasTecnicas() {
     return costPerPortion * (1 + formData.profit_percent / 100);
   };
 
-  const filteredRecipes = recipes?.filter((recipe) =>
+  // Separate recipes by type
+  const pratosFinais = recipes?.filter((r) => 
+    r.recipe_type === "prato_final" && !r.name.toUpperCase().startsWith("SP ")
+  ) || [];
+  
+  const subprodutosRecipes = recipes?.filter((r) => 
+    r.recipe_type === "subproduto" || r.name.toUpperCase().startsWith("SP ")
+  ) || [];
+
+  // Get current tab items
+  const currentItems = activeTab === "pratos" ? pratosFinais : subprodutosRecipes;
+  
+  // Filter by search
+  const filteredRecipes = currentItems.filter((recipe) =>
     recipe.name.toLowerCase().includes(search.toLowerCase())
   );
+
+  // Handle creating new ficha - pre-set SP toggle based on active tab
+  const handleNewFicha = () => {
+    setFormData({
+      ...formData,
+      is_subproduct: activeTab === "subprodutos",
+    });
+    setIsDialogOpen(true);
+  };
 
   return (
     <AppLayout requiredRoles={["admin", "cozinha"]}>
@@ -581,37 +605,49 @@ export default function FichasTecnicas() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Fichas técnicas de pratos</h1>
+            <h1 className="text-3xl font-bold text-foreground">Fichas Técnicas</h1>
             <p className="text-muted-foreground">
               Monte o prato usando os insumos do estoque para ver custo e CMV.
             </p>
           </div>
-          <Button onClick={() => setIsDialogOpen(true)}>
+          <Button onClick={handleNewFicha}>
             <Plus className="mr-2 h-4 w-4" />
-            Nova Ficha
+            {activeTab === "pratos" ? "Novo Prato" : "Novo Subproduto"}
           </Button>
         </div>
 
-        {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por nome..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
-        </div>
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "pratos" | "subprodutos")}>
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="pratos">
+              Pratos Principais ({pratosFinais.length})
+            </TabsTrigger>
+            <TabsTrigger value="subprodutos">
+              Subprodutos SP ({subprodutosRecipes.length})
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Recipe Cards */}
-        {isLoading ? (
-          <div className="text-center py-8 text-muted-foreground">Carregando...</div>
-        ) : filteredRecipes?.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            Nenhuma ficha técnica encontrada
+          {/* Search */}
+          <div className="relative max-w-md mt-4">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder={activeTab === "pratos" ? "Buscar pratos..." : "Buscar subprodutos..."}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10"
+            />
           </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2">
+
+          {/* Pratos Tab Content */}
+          <TabsContent value="pratos" className="mt-4">
+            {isLoading ? (
+              <div className="text-center py-8 text-muted-foreground">Carregando...</div>
+            ) : filteredRecipes.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                {search ? "Nenhum prato encontrado" : "Nenhum prato cadastrado. Crie seu primeiro prato!"}
+              </div>
+            ) : (
+              <div className="grid gap-6 md:grid-cols-2">
             {filteredRecipes?.map((recipe) => {
               const totalCost = calculateRecipeCost(recipe.id);
               const costPerPortion = recipe.yield_quantity > 0 ? totalCost / recipe.yield_quantity : 0;
@@ -775,8 +811,107 @@ export default function FichasTecnicas() {
                 </Card>
               );
             })}
-          </div>
-        )}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Subprodutos Tab Content */}
+          <TabsContent value="subprodutos" className="mt-4">
+            {isLoading ? (
+              <div className="text-center py-8 text-muted-foreground">Carregando...</div>
+            ) : filteredRecipes.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                {search ? "Nenhum subproduto encontrado" : "Nenhum subproduto cadastrado. Crie seu primeiro subproduto!"}
+              </div>
+            ) : (
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {filteredRecipes.map((recipe) => {
+                  const totalCost = calculateRecipeCost(recipe.id);
+                  const costPerPortion = recipe.yield_quantity > 0 ? totalCost / recipe.yield_quantity : 0;
+                  const recipeIngredients = allRecipeItems?.filter((i) => i.recipe_id === recipe.id) || [];
+
+                  return (
+                    <Card key={recipe.id} className="bg-card border-border">
+                      <CardContent className="p-4">
+                        {/* Header with name and actions */}
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1">
+                            <h3 className="text-lg font-bold text-foreground">{recipe.name}</h3>
+                            <p className="text-sm text-muted-foreground">
+                              Rendimento: {recipe.yield_quantity} porções
+                            </p>
+                          </div>
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEdit(recipe)}
+                              className="text-primary hover:text-primary/80 h-8 px-2"
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteMutation.mutate(recipe.id)}
+                              className="text-destructive hover:text-destructive/80 h-8 px-2"
+                            >
+                              Excluir
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Cost Section - Simplified for Subprodutos */}
+                        <div className="bg-muted/50 rounded-lg p-3 mb-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <p className="text-xs text-muted-foreground">Custo Total</p>
+                              <p className="text-lg font-bold text-primary">
+                                R$ {totalCost.toFixed(2)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">Custo/Porção</p>
+                              <p className="text-lg font-bold text-foreground">
+                                R$ {costPerPortion.toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Ingredients List - Compact */}
+                        {recipeIngredients.length > 0 && (
+                          <div className="border-t border-border pt-2">
+                            <p className="text-xs text-muted-foreground mb-1">
+                              Ingredientes ({recipeIngredients.length})
+                            </p>
+                            <div className="text-xs text-muted-foreground space-y-0.5">
+                              {recipeIngredients.slice(0, 3).map((item) => {
+                                const product = products?.find((p) => p.id === item.product_id);
+                                const subrecipe = recipes?.find((r) => r.id === item.subrecipe_id);
+                                const name = product?.name || subrecipe?.name || "N/A";
+                                return (
+                                  <div key={item.id} className="truncate">
+                                    • {name} ({Number(item.quantity).toFixed(2)} {item.unit})
+                                  </div>
+                                );
+                              })}
+                              {recipeIngredients.length > 3 && (
+                                <div className="text-primary">
+                                  +{recipeIngredients.length - 3} mais...
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
 
         {/* Create/Edit Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={(open) => {
