@@ -23,7 +23,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, X, Upload, Image as ImageIcon, Clock } from "lucide-react";
+import { Plus, Search, X, Upload, Image as ImageIcon, Clock, Sparkles, Loader2 } from "lucide-react";
 
 interface Product {
   id: string;
@@ -92,6 +92,7 @@ export default function FichasTecnicas() {
     ingredients: [],
   });
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [generatingImage, setGeneratingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [ingredientType, setIngredientType] = useState<"product" | "subrecipe">("product");
   const [currentIngredient, setCurrentIngredient] = useState({
@@ -417,6 +418,32 @@ export default function FichasTecnicas() {
     },
   });
 
+  // Generate image with AI
+  const handleGenerateImage = async (recipeId: string) => {
+    try {
+      setGeneratingImage(recipeId);
+      
+      const { data, error } = await supabase.functions.invoke("generate-recipe-image", {
+        body: { recipe_id: recipeId },
+      });
+
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error);
+
+      toast({ title: "Imagem gerada com sucesso!" });
+      queryClient.invalidateQueries({ queryKey: ["recipes"] });
+    } catch (error: any) {
+      console.error("Error generating image:", error);
+      toast({ 
+        title: "Erro ao gerar imagem", 
+        description: error.message,
+        variant: "destructive" 
+      });
+    } finally {
+      setGeneratingImage(null);
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       is_subproduct: false,
@@ -666,9 +693,9 @@ export default function FichasTecnicas() {
 
               return (
                 <Card key={recipe.id} className="bg-card border-border overflow-hidden">
-                  {/* Recipe Image */}
-                  {recipe.image_url && (
-                    <div className="relative h-40 overflow-hidden">
+                  {/* Recipe Image or Generate Button */}
+                  {recipe.image_url ? (
+                    <div className="relative h-40 overflow-hidden group">
                       <img
                         src={recipe.image_url}
                         alt={recipe.name}
@@ -680,6 +707,48 @@ export default function FichasTecnicas() {
                           {recipe.preparation_time} min
                         </div>
                       )}
+                      {/* Regenerate button on hover */}
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => handleGenerateImage(recipe.id)}
+                        disabled={generatingImage === recipe.id}
+                      >
+                        {generatingImage === recipe.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4 mr-1" />
+                            Regenerar
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="h-40 bg-muted/50 flex flex-col items-center justify-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleGenerateImage(recipe.id)}
+                        disabled={generatingImage === recipe.id}
+                        className="gap-2"
+                      >
+                        {generatingImage === recipe.id ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Gerando imagem...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4" />
+                            Gerar Imagem com IA
+                          </>
+                        )}
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        ou faça upload ao editar
+                      </p>
                     </div>
                   )}
                   <CardContent className="p-6">
