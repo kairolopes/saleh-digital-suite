@@ -394,6 +394,50 @@ export type Database = {
         }
         Relationships: []
       }
+      pending_whatsapp_purchases: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          message_original: string | null
+          phone: string
+          product_id: string
+          quantity: number
+          total_price: number
+          unit: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          message_original?: string | null
+          phone: string
+          product_id: string
+          quantity: number
+          total_price: number
+          unit: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          message_original?: string | null
+          phone?: string
+          product_id?: string
+          quantity?: number
+          total_price?: number
+          unit?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_whatsapp_purchases_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           average_price: number | null
