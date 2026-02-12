@@ -49,5 +49,8 @@ verify_jwt = true
 [functions.send-reservation-reminder]
 verify_jwt = false
 
+[functions.webhook-zapi-purchase]
+verify_jwt = false
+
 [functions.delete-user]
 verify_jwt = true
