@@ -470,10 +470,11 @@ serve(async (req) => {
     const isAmbiguous = closeRunners.length > 1;
 
     if (isConfident && !isAmbiguous) {
-      // Single confident match -> go to confirmation
+      // Single confident match
       const product = candidates[0];
       // Match supplier if extracted by AI
       let matchedSupplierId: string | null = null;
+      let matchedSupplierName: string | null = null;
       if (parsed.fornecedor) {
         const suppliers = await getActiveSuppliers(supabase);
         const supplierScored = suppliers
@@ -482,9 +483,32 @@ serve(async (req) => {
           .sort((a, b) => b.score - a.score);
         if (supplierScored.length === 1 || (supplierScored.length > 1 && supplierScored[0].score - supplierScored[1].score >= 0.15)) {
           matchedSupplierId = supplierScored[0].id;
+          matchedSupplierName = supplierScored[0].name;
         }
       }
 
+      if (parsed.fornecedor && !matchedSupplierId) {
+        // Supplier mentioned but NOT matched → ask supplier BEFORE confirmation
+        await supabase.from("pending_whatsapp_purchases").insert({
+          phone, product_id: product.id, quantity: parsed.quantidade,
+          total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+          status: "awaiting_supplier", supplier_id: null,
+        });
+
+        const suppliers = await getActiveSuppliers(supabase);
+        let msg = `✅ Produto: *${product.name}*\n`;
+        msg += `❓ Fornecedor "*${parsed.fornecedor}*" não encontrado no sistema.\n\n`;
+        msg += `🏪 *Escolha o fornecedor:*\n`;
+        suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+        msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
+
+        await sendWhatsApp(phone, msg);
+        return new Response(JSON.stringify({ ok: true, awaiting_supplier: true, product: product.name }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Supplier resolved (or not mentioned) → go to confirmation with all data
       await supabase.from("pending_whatsapp_purchases").insert({
         phone, product_id: product.id, quantity: parsed.quantidade,
         total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
@@ -497,7 +521,7 @@ serve(async (req) => {
       msg += `📊 *Quantidade:* ${parsed.quantidade} ${parsed.unidade}\n`;
       msg += `💰 *Valor total:* R$ ${parsed.valor_total.toFixed(2)}\n`;
       msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${parsed.unidade}\n`;
-      if (parsed.fornecedor) msg += `🏪 *Fornecedor:* ${parsed.fornecedor}\n`;
+      if (matchedSupplierName) msg += `🏪 *Fornecedor:* ${matchedSupplierName}\n`;
       msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
 
       await sendWhatsApp(phone, msg);
