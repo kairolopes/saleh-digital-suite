@@ -53,7 +53,7 @@ async function parseWithAI(messageText: string) {
           role: "system",
           content: `Voce extrai dados de compras de insumos de restaurante a partir de mensagens em portugues.
 Extraia: produto, quantidade, unidade (kg, un, L, g, ml, etc), valor_total, fornecedor (se mencionado).
-Use tool calling para retornar os dados estruturados. Se a mensagem nao for sobre compra, retorne null.`,
+REGRA IMPORTANTE: So chame a funcao register_purchase se a mensagem contiver EXPLICITAMENTE os tres dados: produto, quantidade E valor/preco. Se faltar qualquer um desses dados, NAO chame a funcao. Exemplos que NAO devem chamar a funcao: "arroz", "10kg arroz", "arroz 60 reais". Exemplo valido: "10kg arroz 60 reais".`,
         },
         { role: "user", content: messageText },
       ],
@@ -62,7 +62,7 @@ Use tool calling para retornar os dados estruturados. Se a mensagem nao for sobr
           type: "function",
           function: {
             name: "register_purchase",
-            description: "Registra dados de uma compra extraidos da mensagem",
+            description: "Registra dados de uma compra extraidos da mensagem. So chame se produto, quantidade e valor estiverem TODOS presentes na mensagem.",
             parameters: {
               type: "object",
               properties: {
@@ -78,7 +78,7 @@ Use tool calling para retornar os dados estruturados. Se a mensagem nao for sobr
           },
         },
       ],
-      tool_choice: { type: "function", function: { name: "register_purchase" } },
+      tool_choice: "auto",
     }),
   });
 
