@@ -403,6 +403,7 @@ export type Database = {
           phone: string
           product_id: string
           quantity: number
+          status: string
           total_price: number
           unit: string
         }
@@ -414,6 +415,7 @@ export type Database = {
           phone: string
           product_id: string
           quantity: number
+          status?: string
           total_price: number
           unit: string
         }
@@ -425,6 +427,7 @@ export type Database = {
           phone?: string
           product_id?: string
           quantity?: number
+          status?: string
           total_price?: number
           unit?: string
         }

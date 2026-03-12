@@ -1,0 +1,1 @@
+ALTER TABLE public.pending_whatsapp_purchases ADD COLUMN status text NOT NULL DEFAULT 'awaiting_confirmation';
