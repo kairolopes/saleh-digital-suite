@@ -193,7 +193,7 @@ function buildConfirmation(
 
 type Pending = {
   id: string; product_id: string; quantity: number; total_price: number;
-  unit: string; message_original: string; product_options: any;
+  unit: string; message_original: string; product_options: any; supplier_id: string | null;
 };
 
 async function handleProductChoice(
