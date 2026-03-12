@@ -118,7 +118,17 @@ REGRA IMPORTANTE: So chame a funcao register_purchase se a mensagem contiver EXP
   if (!toolCall) return null;
 
   try {
-    return JSON.parse(toolCall.function.arguments) as {
+    const raw = JSON.parse(toolCall.function.arguments) as {
+      produto: string; quantidade: number; unidade: string;
+      valor_total?: number; valor_unitario?: number; fornecedor?: string | null;
+    };
+    // Calculate valor_total from valor_unitario if needed
+    if (!raw.valor_total && raw.valor_unitario && raw.quantidade) {
+      raw.valor_total = raw.valor_unitario * raw.quantidade;
+    }
+    // Ensure valor_total exists
+    if (!raw.valor_total || raw.valor_total <= 0) return null;
+    return { ...raw, valor_total: raw.valor_total, fornecedor: raw.fornecedor ?? null } as {
       produto: string; quantidade: number; unidade: string; valor_total: number; fornecedor: string | null;
     };
   } catch {
