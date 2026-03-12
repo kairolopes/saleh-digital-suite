@@ -405,6 +405,7 @@ export type Database = {
           product_options: Json | null
           quantity: number
           status: string
+          supplier_id: string | null
           total_price: number
           unit: string
         }
@@ -418,6 +419,7 @@ export type Database = {
           product_options?: Json | null
           quantity: number
           status?: string
+          supplier_id?: string | null
           total_price: number
           unit: string
         }
@@ -431,6 +433,7 @@ export type Database = {
           product_options?: Json | null
           quantity?: number
           status?: string
+          supplier_id?: string | null
           total_price?: number
           unit?: string
         }
@@ -440,6 +443,13 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pending_whatsapp_purchases_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]

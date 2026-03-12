@@ -1,0 +1,1 @@
+ALTER TABLE public.pending_whatsapp_purchases ADD COLUMN supplier_id uuid REFERENCES public.suppliers(id);
