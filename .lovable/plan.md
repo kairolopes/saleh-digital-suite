@@ -1,27 +1,30 @@
 
 
-## Cadastrar 13 Fornecedores
+## Problema
 
-Inserir os seguintes fornecedores na tabela `suppliers`:
+Atualmente, `handleProductChoice` e `handleSupplierSelection` só aceitam resposta numérica. Se o usuário digitar o nome do produto (ex: "feijão carioca") ou do fornecedor (ex: "Atacadão"), o bot rejeita com "responda com o número".
 
-1. Assai
-2. Tatico
-3. Armazem atacadista
-4. Ceasa
-5. Costa atacadao
-6. Dia a dia
-7. Swift
-8. Goias atacadista
-9. Comfrios
-10. Vr atacadista
-11. Cristal alimentos
-12. Vini lac
-13. Ancora alimentos
+## Solução
 
-### Detalhes tecnicos
+Modificar as duas funções para aceitar **número OU texto**:
 
-- Executar um `INSERT` na tabela `suppliers` com os 13 nomes
-- Todos serao criados com `is_active = true` (padrao)
-- Campos opcionais (telefone, email, endereco, contato) ficam vazios por enquanto
-- Sera usado o insert tool do banco de dados (nao migracoes, pois e insercao de dados)
+### 1. `handleProductChoice` (linha 199-228)
+- Primeiro tenta `parseInt`. Se for número válido, usa como antes.
+- Se não for número, faz busca semântica usando `scoreProduct()` contra as opções disponíveis (`pending.product_options`).
+- Se encontrar match único com score alto (>= 0.7), seleciona automaticamente.
+- Se encontrar múltiplos matches próximos, re-envia a lista pedindo para ser mais específico.
+- Se nenhum match, informa que não encontrou e re-envia a lista.
+
+### 2. `handleSupplierSelection` (linha 260-301)
+- Primeiro tenta `parseInt`. Se for número válido (incluindo 0), usa como antes.
+- Se não for número, faz busca semântica com `scoreProduct()` (funciona para qualquer nome) contra a lista de fornecedores ativos.
+- Se encontrar match único confiante, seleciona.
+- Se ambíguo, re-envia lista pedindo número.
+- Se nenhum match, informa e re-envia lista.
+
+### Arquivo a editar
+- `supabase/functions/webhook-zapi-purchase/index.ts`: funções `handleProductChoice` e `handleSupplierSelection`.
+
+### Também atualizar as mensagens
+- Trocar "_Responda com o número._" por "_Responda com o número ou o nome._" em todos os pontos relevantes (escolha de produto e fornecedor).
 
