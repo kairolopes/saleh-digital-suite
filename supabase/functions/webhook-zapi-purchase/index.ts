@@ -229,18 +229,40 @@ async function handleProductChoice(
     }
   }
 
+  // Product chosen — now check if supplier still needs resolving
+  if (!pending.supplier_id) {
+    // No supplier resolved yet — ask for supplier before confirmation
+    await supabase.from("pending_whatsapp_purchases").update({
+      product_id: chosen.id,
+      status: "awaiting_supplier",
+      product_options: null,
+    }).eq("id", pending.id);
+
+    const suppliers = await getActiveSuppliers(supabase);
+    let msg = `✅ Produto: *${chosen.name}*\n\n`;
+    msg += `🏪 *Escolha o fornecedor:*\n`;
+    suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+    msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
+
+    await sendWhatsApp(phone, msg);
+    return { ok: true, awaiting_supplier: true };
+  }
+
+  // Supplier already resolved — go straight to confirmation
   await supabase.from("pending_whatsapp_purchases").update({
     product_id: chosen.id,
     status: "awaiting_confirmation",
     product_options: null,
   }).eq("id", pending.id);
 
+  const { data: supplier } = await supabase.from("suppliers").select("name").eq("id", pending.supplier_id).single();
   const unitPrice = pending.total_price / pending.quantity;
   let msg = `🔍 *Confira os dados da compra:*\n\n`;
   msg += `📦 *Produto:* ${chosen.name}\n`;
   msg += `📊 *Quantidade:* ${pending.quantity} ${pending.unit}\n`;
   msg += `💰 *Valor total:* R$ ${pending.total_price.toFixed(2)}\n`;
   msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${pending.unit}\n`;
+  if (supplier?.name) msg += `🏪 *Fornecedor:* ${supplier.name}\n`;
   msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
 
   await sendWhatsApp(phone, msg);
