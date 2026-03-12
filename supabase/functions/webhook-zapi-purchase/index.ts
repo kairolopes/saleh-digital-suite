@@ -464,7 +464,7 @@ serve(async (req) => {
     // 2. Parse new purchase with AI
     const parsed = await parseWithAI(messageText);
     if (!parsed || !parsed.quantidade || parsed.quantidade <= 0 || !parsed.valor_total || parsed.valor_total <= 0) {
-      await sendWhatsApp(phone, "❌ Não consegui identificar todos os dados da compra. Envie no formato:\n\n_10kg arroz 60 reais_\n_5 unidades alho 15_\n\nInforme *produto*, *quantidade* e *valor*.");
+      await sendWhatsApp(phone, "❌ Não consegui identificar todos os dados da compra.\n\nExemplos válidos:\n_10kg arroz 60 reais_\n_comprei feijão 30kg a 2,50 o kg_\n_paguei 150 em 5 fardos de cerveja_\n\nInforme *produto*, *quantidade* e *valor*.");
       return new Response(JSON.stringify({ ok: true, not_purchase: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
