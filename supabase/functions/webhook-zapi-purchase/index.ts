@@ -261,7 +261,7 @@ async function handleConfirmation(
     let msg = `👍 Confirmado! *${product?.name}* — ${pending.quantity} ${pending.unit} — R$ ${pending.total_price.toFixed(2)}\n\n`;
     msg += `🏪 *Escolha o fornecedor:*\n`;
     suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-    msg += `0 - Nenhum\n\n_Responda com o número._`;
+    msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
 
     await sendWhatsApp(phone, msg);
     return { ok: true, awaiting_supplier: true };
