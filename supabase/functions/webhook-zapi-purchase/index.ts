@@ -159,6 +159,38 @@ function buildConfirmation(
   return `✅ *Compra registrada!*\n\n📦 *Produto:* ${productName}\n📊 *Quantidade:* ${quantity} ${unit}\n💰 *Total:* R$ ${totalPrice.toFixed(2)}\n📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${unit}${supplierName ? `\n🏪 *Fornecedor:* ${supplierName}` : ""}\n\n_Estoque atualizado automaticamente._`;
 }
 
+async function handleConfirmation(
+  supabase: ReturnType<typeof createClient>, phone: string, messageText: string,
+  pending: { id: string; product_id: string; quantity: number; total_price: number; unit: string; message_original: string }
+) {
+  const answer = normalize(messageText);
+  
+  if (answer === "sim" || answer === "s" || answer === "1") {
+    // User confirmed — move to supplier selection
+    await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pending.id);
+    
+    const suppliers = await getActiveSuppliers(supabase);
+    const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
+    
+    let msg = `👍 Confirmado! *${product?.name}* — ${pending.quantity} ${pending.unit} — R$ ${pending.total_price.toFixed(2)}\n\n`;
+    msg += `🏪 *Escolha o fornecedor:*\n`;
+    suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+    msg += `0 - Nenhum\n\n_Responda com o número._`;
+    
+    await sendWhatsApp(phone, msg);
+    return { ok: true, awaiting_supplier: true };
+  }
+  
+  if (answer === "nao" || answer === "n" || answer === "não" || answer === "0") {
+    await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
+    await sendWhatsApp(phone, "❌ Compra cancelada. Envie novamente com os dados corretos.");
+    return { ok: true, cancelled: true };
+  }
+  
+  await sendWhatsApp(phone, "🔄 Responda *Sim* para confirmar ou *Não* para cancelar.");
+  return { ok: true, awaiting_confirmation: true };
+}
+
 async function handleSupplierSelection(
   supabase: ReturnType<typeof createClient>, phone: string, messageText: string,
   pending: { id: string; product_id: string; quantity: number; total_price: number; unit: string; message_original: string }
@@ -184,7 +216,6 @@ async function handleSupplierSelection(
     supplierName = suppliers[num - 1].name;
   }
 
-  // Get product name for confirmation
   const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
 
   const { error: insertError } = await insertPurchase(
@@ -197,7 +228,6 @@ async function handleSupplierSelection(
     return { ok: false, error: "insert_failed" };
   }
 
-  // Delete pending
   await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
 
   await sendWhatsApp(phone, buildConfirmation(
