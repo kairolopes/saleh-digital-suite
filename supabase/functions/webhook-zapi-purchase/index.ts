@@ -308,49 +308,28 @@ serve(async (req) => {
       });
     }
 
-    // 4. Handle supplier
-    if (parsed.fornecedor) {
-      const supplier = await findSupplier(supabase, parsed.fornecedor);
-      if (supplier) {
-        // Supplier found — register directly
-        const { error } = await insertPurchase(supabase, product.id, parsed.quantidade, parsed.valor_total, supplier.id, messageText);
-        if (error) {
-          await sendWhatsApp(phone, "❌ Erro ao registrar a compra.");
-          return new Response(JSON.stringify({ ok: false, error: "insert_failed" }), {
-            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        await sendWhatsApp(phone, buildConfirmation(product.name, parsed.quantidade, parsed.unidade, parsed.valor_total, supplier.name));
-        return new Response(JSON.stringify({ ok: true, product: product.name, supplier: supplier.name }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      } else {
-        // Supplier mentioned but not found — warn and ask to select
-        await sendWhatsApp(phone, `⚠️ Fornecedor "${parsed.fornecedor}" não encontrado.`);
-      }
-    }
-
-    // 5. No supplier or not found — save pending & ask
-    const suppliers = await getActiveSuppliers(supabase);
-
-    // Clean old pendings for this phone
+    // 4. Clean old pendings & save as awaiting_confirmation
     await supabase.from("pending_whatsapp_purchases").delete().eq("phone", phone);
 
-    // Save pending
     await supabase.from("pending_whatsapp_purchases").insert({
       phone, product_id: product.id, quantity: parsed.quantidade,
       total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+      status: "awaiting_confirmation",
     });
 
-    // Build supplier list
-    let msg = `📦 *${product.name}* — ${parsed.quantidade} ${parsed.unidade} — R$ ${parsed.valor_total.toFixed(2)}\n\n`;
-    msg += `🏪 *Escolha o fornecedor:*\n`;
-    suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-    msg += `0 - Nenhum\n\n_Responda com o número._`;
+    // 5. Ask user to confirm
+    const unitPrice = parsed.valor_total / parsed.quantidade;
+    let msg = `🔍 *Confira os dados da compra:*\n\n`;
+    msg += `📦 *Produto:* ${product.name}\n`;
+    msg += `📊 *Quantidade:* ${parsed.quantidade} ${parsed.unidade}\n`;
+    msg += `💰 *Valor total:* R$ ${parsed.valor_total.toFixed(2)}\n`;
+    msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${parsed.unidade}\n`;
+    if (parsed.fornecedor) msg += `🏪 *Fornecedor:* ${parsed.fornecedor}\n`;
+    msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
 
     await sendWhatsApp(phone, msg);
 
-    return new Response(JSON.stringify({ ok: true, awaiting_supplier: true, product: product.name }), {
+    return new Response(JSON.stringify({ ok: true, awaiting_confirmation: true, product: product.name }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
