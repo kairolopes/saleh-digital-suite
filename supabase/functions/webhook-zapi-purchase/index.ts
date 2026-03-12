@@ -462,10 +462,23 @@ serve(async (req) => {
     if (isConfident && !isAmbiguous) {
       // Single confident match -> go to confirmation
       const product = candidates[0];
+      // Match supplier if extracted by AI
+      let matchedSupplierId: string | null = null;
+      if (parsed.fornecedor) {
+        const suppliers = await getActiveSuppliers(supabase);
+        const supplierScored = suppliers
+          .map(s => ({ ...s, score: scoreProduct(parsed.fornecedor!, s.name) }))
+          .filter(s => s.score >= 0.5)
+          .sort((a, b) => b.score - a.score);
+        if (supplierScored.length === 1 || (supplierScored.length > 1 && supplierScored[0].score - supplierScored[1].score >= 0.15)) {
+          matchedSupplierId = supplierScored[0].id;
+        }
+      }
+
       await supabase.from("pending_whatsapp_purchases").insert({
         phone, product_id: product.id, quantity: parsed.quantidade,
         total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
-        status: "awaiting_confirmation",
+        status: "awaiting_confirmation", supplier_id: matchedSupplierId,
       });
 
       const unitPrice = parsed.valor_total / parsed.quantidade;
