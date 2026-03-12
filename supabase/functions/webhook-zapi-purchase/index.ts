@@ -498,11 +498,25 @@ serve(async (req) => {
       // Ambiguous or low confidence -> ask user to choose product
       const options = closeRunners.slice(0, 5); // max 5 options
 
+      // Reuse matchedSupplierId from above (supplier matching already done for confident path)
+      let ambiguousSupplierId: string | null = null;
+      if (parsed.fornecedor) {
+        const suppliers = await getActiveSuppliers(supabase);
+        const supplierScored = suppliers
+          .map(s => ({ ...s, score: scoreProduct(parsed.fornecedor!, s.name) }))
+          .filter(s => s.score >= 0.5)
+          .sort((a, b) => b.score - a.score);
+        if (supplierScored.length === 1 || (supplierScored.length > 1 && supplierScored[0].score - supplierScored[1].score >= 0.15)) {
+          ambiguousSupplierId = supplierScored[0].id;
+        }
+      }
+
       await supabase.from("pending_whatsapp_purchases").insert({
         phone, product_id: options[0].id, quantity: parsed.quantidade,
         total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
         status: "awaiting_product_choice",
         product_options: options.map(o => ({ id: o.id, name: o.name })),
+        supplier_id: ambiguousSupplierId,
       });
 
       let msg = `🔍 Encontrei mais de um produto parecido com "*${parsed.produto}*".\n\n`;
