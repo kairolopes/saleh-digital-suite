@@ -280,24 +280,49 @@ async function handleConfirmation(
 async function handleSupplierSelection(
   supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: Pending
 ) {
-  const num = parseInt(messageText.trim(), 10);
-
-  if (isNaN(num) || num < 0) {
-    await sendWhatsApp(phone, "❌ Responda com o *número* do fornecedor ou *0* para nenhum.");
-    return { ok: true, awaiting_supplier: true };
-  }
-
   const suppliers = await getActiveSuppliers(supabase);
   let supplierId: string | null = null;
   let supplierName: string | null = null;
 
-  if (num > 0) {
-    if (num > suppliers.length) {
-      await sendWhatsApp(phone, `❌ Número inválido. Escolha de 0 a ${suppliers.length}.`);
-      return { ok: true, awaiting_supplier: true };
+  const answer = normalize(messageText);
+  if (answer === "nenhum" || answer === "nenhuma" || answer === "sem fornecedor") {
+    // Treat as "0"
+  } else {
+    const num = parseInt(messageText.trim(), 10);
+    if (!isNaN(num) && num >= 0) {
+      if (num === 0) {
+        // No supplier
+      } else if (num > suppliers.length) {
+        await sendWhatsApp(phone, `❌ Número inválido. Escolha de 0 a ${suppliers.length}.`);
+        return { ok: true, awaiting_supplier: true };
+      } else {
+        supplierId = suppliers[num - 1].id;
+        supplierName = suppliers[num - 1].name;
+      }
+    } else {
+      // Semantic search against suppliers
+      const scored = suppliers
+        .map(s => ({ ...s, score: scoreProduct(messageText, s.name) }))
+        .filter(s => s.score >= 0.5)
+        .sort((a, b) => b.score - a.score);
+
+      if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= 0.15)) {
+        supplierId = scored[0].id;
+        supplierName = scored[0].name;
+      } else if (scored.length > 1) {
+        let msg = `🔍 Encontrei mais de um fornecedor parecido. Escolha pelo número:\n\n`;
+        suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+        msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
+        await sendWhatsApp(phone, msg);
+        return { ok: true, awaiting_supplier: true };
+      } else {
+        let msg = `❌ Fornecedor não encontrado. Escolha pelo número:\n\n`;
+        suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+        msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
+        await sendWhatsApp(phone, msg);
+        return { ok: true, awaiting_supplier: true };
+      }
     }
-    supplierId = suppliers[num - 1].id;
-    supplierName = suppliers[num - 1].name;
   }
 
   const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
