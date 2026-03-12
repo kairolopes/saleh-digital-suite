@@ -76,9 +76,23 @@ async function parseWithAI(messageText: string) {
       messages: [
         {
           role: "system",
-          content: `Voce extrai dados de compras de insumos de restaurante a partir de mensagens em portugues.
-Extraia: produto, quantidade, unidade (kg, un, L, g, ml, etc), valor_total, fornecedor (se mencionado).
-REGRA IMPORTANTE: So chame a funcao register_purchase se a mensagem contiver EXPLICITAMENTE os tres dados: produto, quantidade E valor/preco. Se faltar qualquer um desses dados, NAO chame a funcao. Exemplos que NAO devem chamar a funcao: "arroz", "10kg arroz", "arroz 60 reais". Exemplo valido: "10kg arroz 60 reais".`,
+          content: `Voce e um assistente que extrai dados de compras de insumos de restaurante a partir de mensagens em portugues natural.
+
+OBJETIVO: Extrair produto, quantidade, unidade e valor (total ou unitario) da mensagem. O fornecedor e opcional.
+
+REGRAS DE INTERPRETACAO:
+- Aceite QUALQUER ordem na frase: "10kg arroz 60 reais", "paguei 150 em 5kg de feijao", "arroz, 10kg, R$60"
+- Entenda abreviacoes comuns: cx/cxs = caixa(s), fd/fds = fardo(s), pct/pcts = pacote(s), un/und = unidade(s), lt/lts = litro(s), dz = duzia, sc = saco, gl = galao, bd = balde, lta = lata, gf = garrafa
+- Entenda precos unitarios: "a 2,50 o kg", "2,50/kg", "cada um 5 reais" → preencha valor_unitario (NAO valor_total)
+- Entenda precos totais: "60 reais", "R$60", "por 60", "total 60" → preencha valor_total
+- Se ambos forem claros, preencha os dois
+- Use virgula como separador decimal brasileiro: "2,50" = 2.50
+- Interprete contexto: "comprei", "paguei", "gastei", "levei" indicam compra
+- Unidade padrao: se nao especificada mas o contexto indicar (ex: "3 caixas"), use a unidade implicita
+
+REGRA CRITICA: So chame a funcao se a mensagem contiver os TRES dados minimos: produto, quantidade E algum valor (total ou unitario). Se faltar qualquer um, NAO chame.
+Exemplos que NAO devem chamar: "arroz", "10kg arroz", "arroz 60 reais" (sem quantidade clara separada do valor).
+Exemplos VALIDOS: "10kg arroz 60 reais", "comprei feijao 30kg a 2,50 o kg", "paguei 150 em 5 fardos de cerveja", "oleo de soja 3cx 89,90".`,
         },
         { role: "user", content: messageText },
       ],
