@@ -7,23 +7,48 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const STOPWORDS = new Set(["e", "de", "da", "do", "das", "dos", "com", "em", "no", "na", "um", "uma", "o", "a", "os", "as", "por"]);
+
 function normalize(text: string): string {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
-function similarity(a: string, b: string): number {
-  const na = normalize(a);
-  const nb = normalize(b);
-  if (na === nb) return 1;
-  if (nb.includes(na) || na.includes(nb)) return 0.8;
-  const wordsA = na.split(/\s+/);
-  const wordsB = nb.split(/\s+/);
-  let matches = 0;
-  for (const w of wordsA) {
-    if (w.length < 3) continue;
-    if (wordsB.some((wb) => wb.includes(w) || w.includes(wb))) matches++;
+function tokenize(text: string): string[] {
+  return normalize(text)
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && !STOPWORDS.has(w));
+}
+
+/** Score how well `query` matches `candidate` product name. Returns 0-1. */
+function scoreProduct(query: string, candidateName: string): number {
+  const nq = normalize(query);
+  const nc = normalize(candidateName);
+
+  // Tier 1: exact match
+  if (nq === nc) return 1.0;
+
+  // Tier 2: candidate starts with query or query starts with candidate
+  if (nc.startsWith(nq)) return 0.9;
+  if (nq.startsWith(nc)) return 0.85;
+
+  // Tier 3: candidate contains query as substring
+  if (nc.includes(nq)) return 0.8;
+
+  // Tier 4: token overlap (only meaningful tokens)
+  const queryTokens = tokenize(query);
+  const candidateTokens = tokenize(candidateName);
+  if (queryTokens.length === 0) return 0;
+
+  let matchedTokens = 0;
+  for (const qt of queryTokens) {
+    if (candidateTokens.some(ct => ct === qt || ct.startsWith(qt) || qt.startsWith(ct))) {
+      matchedTokens++;
+    }
   }
-  return wordsA.length > 0 ? matches / wordsA.length : 0;
+
+  const coverage = matchedTokens / queryTokens.length;
+  // Scale token overlap to 0.3-0.7 range
+  return coverage * 0.7;
 }
 
 async function sendWhatsApp(phone: string, message: string) {
@@ -105,42 +130,47 @@ function getSupabase() {
   return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 }
 
-async function findProduct(supabase: ReturnType<typeof createClient>, productName: string) {
+interface ProductMatch { id: string; name: string; unit: string; score: number }
+
+/** Find matching products. Returns sorted list of candidates above threshold. */
+async function findProducts(supabase: ReturnType<typeof getSupabase>, productName: string): Promise<ProductMatch[]> {
   const { data: products, error } = await supabase
     .from("products").select("id, name, unit").eq("is_active", true);
-  if (error || !products) return null;
+  if (error || !products) return [];
 
-  let bestMatch: { id: string; name: string; unit: string } | null = null;
-  let bestScore = 0;
+  const scored: ProductMatch[] = [];
   for (const p of products) {
-    const score = similarity(productName, p.name);
-    if (score > bestScore) { bestScore = score; bestMatch = p; }
+    const score = scoreProduct(productName, p.name);
+    if (score >= 0.3) {
+      scored.push({ id: p.id, name: p.name, unit: p.unit, score });
+    }
   }
 
-  if (!bestMatch || bestScore < 0.4) {
+  // Also try ilike fallback
+  if (scored.length === 0) {
+    const nq = normalize(productName);
     const { data: ilikeProd } = await supabase
       .from("products").select("id, name, unit").eq("is_active", true)
-      .ilike("name", `%${normalize(productName)}%`).limit(1);
-    if (ilikeProd?.length) { bestMatch = ilikeProd[0]; bestScore = 0.6; }
+      .ilike("name", `%${nq}%`);
+    if (ilikeProd?.length) {
+      for (const p of ilikeProd) {
+        scored.push({ id: p.id, name: p.name, unit: p.unit, score: 0.6 });
+      }
+    }
   }
 
-  return bestScore >= 0.3 ? bestMatch : null;
+  scored.sort((a, b) => b.score - a.score);
+  console.log(`Product matching for "${productName}":`, JSON.stringify(scored.slice(0, 5)));
+  return scored;
 }
 
-async function getActiveSuppliers(supabase: ReturnType<typeof createClient>) {
+async function getActiveSuppliers(supabase: ReturnType<typeof getSupabase>) {
   const { data } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
   return data || [];
 }
 
-async function findSupplier(supabase: ReturnType<typeof createClient>, supplierName: string) {
-  const { data } = await supabase
-    .from("suppliers").select("id, name").eq("is_active", true)
-    .ilike("name", `%${normalize(supplierName)}%`).limit(1);
-  return data?.[0] || null;
-}
-
 async function insertPurchase(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof getSupabase>,
   productId: string, quantity: number, totalPrice: number,
   supplierId: string | null, message: string
 ) {
@@ -159,44 +189,78 @@ function buildConfirmation(
   return `✅ *Compra registrada!*\n\n📦 *Produto:* ${productName}\n📊 *Quantidade:* ${quantity} ${unit}\n💰 *Total:* R$ ${totalPrice.toFixed(2)}\n📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${unit}${supplierName ? `\n🏪 *Fornecedor:* ${supplierName}` : ""}\n\n_Estoque atualizado automaticamente._`;
 }
 
+// --- State handlers ---
+
+type Pending = {
+  id: string; product_id: string; quantity: number; total_price: number;
+  unit: string; message_original: string; product_options: any;
+};
+
+async function handleProductChoice(
+  supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: Pending
+) {
+  const num = parseInt(messageText.trim(), 10);
+  const options: { id: string; name: string }[] = pending.product_options || [];
+
+  if (isNaN(num) || num < 1 || num > options.length) {
+    await sendWhatsApp(phone, `❌ Responda com o *número* do produto (1 a ${options.length}).`);
+    return { ok: true, awaiting_product_choice: true };
+  }
+
+  const chosen = options[num - 1];
+  // Update pending with chosen product and move to confirmation
+  await supabase.from("pending_whatsapp_purchases").update({
+    product_id: chosen.id,
+    status: "awaiting_confirmation",
+    product_options: null,
+  }).eq("id", pending.id);
+
+  const unitPrice = pending.total_price / pending.quantity;
+  let msg = `🔍 *Confira os dados da compra:*\n\n`;
+  msg += `📦 *Produto:* ${chosen.name}\n`;
+  msg += `📊 *Quantidade:* ${pending.quantity} ${pending.unit}\n`;
+  msg += `💰 *Valor total:* R$ ${pending.total_price.toFixed(2)}\n`;
+  msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${pending.unit}\n`;
+  msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
+
+  await sendWhatsApp(phone, msg);
+  return { ok: true, awaiting_confirmation: true };
+}
+
 async function handleConfirmation(
-  supabase: ReturnType<typeof createClient>, phone: string, messageText: string,
-  pending: { id: string; product_id: string; quantity: number; total_price: number; unit: string; message_original: string }
+  supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: Pending
 ) {
   const answer = normalize(messageText);
-  
+
   if (answer === "sim" || answer === "s" || answer === "1") {
-    // User confirmed — move to supplier selection
     await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pending.id);
-    
+
     const suppliers = await getActiveSuppliers(supabase);
     const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
-    
+
     let msg = `👍 Confirmado! *${product?.name}* — ${pending.quantity} ${pending.unit} — R$ ${pending.total_price.toFixed(2)}\n\n`;
     msg += `🏪 *Escolha o fornecedor:*\n`;
     suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
     msg += `0 - Nenhum\n\n_Responda com o número._`;
-    
+
     await sendWhatsApp(phone, msg);
     return { ok: true, awaiting_supplier: true };
   }
-  
+
   if (answer === "nao" || answer === "n" || answer === "não" || answer === "0") {
     await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
     await sendWhatsApp(phone, "❌ Compra cancelada. Envie novamente com os dados corretos.");
     return { ok: true, cancelled: true };
   }
-  
+
   await sendWhatsApp(phone, "🔄 Responda *Sim* para confirmar ou *Não* para cancelar.");
   return { ok: true, awaiting_confirmation: true };
 }
 
 async function handleSupplierSelection(
-  supabase: ReturnType<typeof createClient>, phone: string, messageText: string,
-  pending: { id: string; product_id: string; quantity: number; total_price: number; unit: string; message_original: string }
+  supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: Pending
 ) {
-  const choice = messageText.trim();
-  const num = parseInt(choice, 10);
+  const num = parseInt(messageText.trim(), 10);
 
   if (isNaN(num) || num < 0) {
     await sendWhatsApp(phone, "❌ Responda com o *número* do fornecedor ou *0* para nenhum.");
@@ -237,6 +301,8 @@ async function handleSupplierSelection(
   return { ok: true, product: product?.name, supplier: supplierName };
 }
 
+// --- Main handler ---
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -263,7 +329,7 @@ serve(async (req) => {
     console.log(`Message from ${phone}: ${messageText}`);
     const supabase = getSupabase();
 
-    // 1. Check for pending purchase (supplier selection)
+    // 1. Check for pending interactions
     const { data: pendingList } = await supabase
       .from("pending_whatsapp_purchases")
       .select("*")
@@ -274,14 +340,17 @@ serve(async (req) => {
 
     if (pendingList?.length) {
       const pending = pendingList[0];
-      if (pending.status === "awaiting_confirmation") {
-        const result = await handleConfirmation(supabase, phone, messageText, pending);
-        return new Response(JSON.stringify(result), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      let result;
+
+      if (pending.status === "awaiting_product_choice") {
+        result = await handleProductChoice(supabase, phone, messageText, pending);
+      } else if (pending.status === "awaiting_confirmation") {
+        result = await handleConfirmation(supabase, phone, messageText, pending);
+      } else if (pending.status === "awaiting_supplier") {
+        result = await handleSupplierSelection(supabase, phone, messageText, pending);
       }
-      if (pending.status === "awaiting_supplier") {
-        const result = await handleSupplierSelection(supabase, phone, messageText, pending);
+
+      if (result) {
         return new Response(JSON.stringify(result), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -299,39 +368,71 @@ serve(async (req) => {
 
     console.log("Parsed:", JSON.stringify(parsed));
 
-    // 3. Find product
-    const product = await findProduct(supabase, parsed.produto);
-    if (!product) {
+    // 3. Find product candidates
+    const candidates = await findProducts(supabase, parsed.produto);
+
+    if (candidates.length === 0) {
       await sendWhatsApp(phone, `❌ Produto "${parsed.produto}" não encontrado no sistema.\n\nVerifique o nome e tente novamente.`);
       return new Response(JSON.stringify({ ok: false, error: "product_not_found" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // 4. Clean old pendings & save as awaiting_confirmation
+    // Clean old pendings
     await supabase.from("pending_whatsapp_purchases").delete().eq("phone", phone);
 
-    await supabase.from("pending_whatsapp_purchases").insert({
-      phone, product_id: product.id, quantity: parsed.quantidade,
-      total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
-      status: "awaiting_confirmation",
-    });
+    const CONFIDENCE_THRESHOLD = 0.8;
+    const AMBIGUITY_GAP = 0.15;
+    const topScore = candidates[0].score;
 
-    // 5. Ask user to confirm
-    const unitPrice = parsed.valor_total / parsed.quantidade;
-    let msg = `🔍 *Confira os dados da compra:*\n\n`;
-    msg += `📦 *Produto:* ${product.name}\n`;
-    msg += `📊 *Quantidade:* ${parsed.quantidade} ${parsed.unidade}\n`;
-    msg += `💰 *Valor total:* R$ ${parsed.valor_total.toFixed(2)}\n`;
-    msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${parsed.unidade}\n`;
-    if (parsed.fornecedor) msg += `🏪 *Fornecedor:* ${parsed.fornecedor}\n`;
-    msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
+    // Check if top match is confident and clearly ahead
+    const isConfident = topScore >= CONFIDENCE_THRESHOLD;
+    const closeRunners = candidates.filter(c => c.score >= topScore - AMBIGUITY_GAP);
+    const isAmbiguous = closeRunners.length > 1;
 
-    await sendWhatsApp(phone, msg);
+    if (isConfident && !isAmbiguous) {
+      // Single confident match -> go to confirmation
+      const product = candidates[0];
+      await supabase.from("pending_whatsapp_purchases").insert({
+        phone, product_id: product.id, quantity: parsed.quantidade,
+        total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+        status: "awaiting_confirmation",
+      });
 
-    return new Response(JSON.stringify({ ok: true, awaiting_confirmation: true, product: product.name }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+      const unitPrice = parsed.valor_total / parsed.quantidade;
+      let msg = `🔍 *Confira os dados da compra:*\n\n`;
+      msg += `📦 *Produto:* ${product.name}\n`;
+      msg += `📊 *Quantidade:* ${parsed.quantidade} ${parsed.unidade}\n`;
+      msg += `💰 *Valor total:* R$ ${parsed.valor_total.toFixed(2)}\n`;
+      msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${parsed.unidade}\n`;
+      if (parsed.fornecedor) msg += `🏪 *Fornecedor:* ${parsed.fornecedor}\n`;
+      msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
+
+      await sendWhatsApp(phone, msg);
+      return new Response(JSON.stringify({ ok: true, awaiting_confirmation: true, product: product.name }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    } else {
+      // Ambiguous or low confidence -> ask user to choose product
+      const options = closeRunners.slice(0, 5); // max 5 options
+
+      await supabase.from("pending_whatsapp_purchases").insert({
+        phone, product_id: options[0].id, quantity: parsed.quantidade,
+        total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+        status: "awaiting_product_choice",
+        product_options: options.map(o => ({ id: o.id, name: o.name })),
+      });
+
+      let msg = `🔍 Encontrei mais de um produto parecido com "*${parsed.produto}*".\n\n`;
+      msg += `📋 *Qual é o produto correto?*\n`;
+      options.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
+      msg += `\n_Responda com o número._`;
+
+      await sendWhatsApp(phone, msg);
+      return new Response(JSON.stringify({ ok: true, awaiting_product_choice: true, candidates: options.map(o => o.name) }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
   } catch (err) {
     console.error("Webhook error:", err);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown" }), {

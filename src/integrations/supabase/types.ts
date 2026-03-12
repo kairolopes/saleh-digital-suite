@@ -402,6 +402,7 @@ export type Database = {
           message_original: string | null
           phone: string
           product_id: string
+          product_options: Json | null
           quantity: number
           status: string
           total_price: number
@@ -414,6 +415,7 @@ export type Database = {
           message_original?: string | null
           phone: string
           product_id: string
+          product_options?: Json | null
           quantity: number
           status?: string
           total_price: number
@@ -426,6 +428,7 @@ export type Database = {
           message_original?: string | null
           phone?: string
           product_id?: string
+          product_options?: Json | null
           quantity?: number
           status?: string
           total_price?: number
