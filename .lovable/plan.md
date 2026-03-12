@@ -1,27 +1,22 @@
 
 
-## Cadastrar 13 Fornecedores
+## Problema
 
-Inserir os seguintes fornecedores na tabela `suppliers`:
+A IA (Gemini) está sendo forçada a chamar `register_purchase` via `tool_choice: { type: "function", function: { name: "register_purchase" } }`, mesmo quando a mensagem contém apenas "arroz" sem quantidade nem valor. A IA inventa valores (quantidade: 1, valor: 0.00) para satisfazer os campos `required`.
 
-1. Assai
-2. Tatico
-3. Armazem atacadista
-4. Ceasa
-5. Costa atacadao
-6. Dia a dia
-7. Swift
-8. Goias atacadista
-9. Comfrios
-10. Vr atacadista
-11. Cristal alimentos
-12. Vini lac
-13. Ancora alimentos
+## Solução
 
-### Detalhes tecnicos
+Duas camadas de proteção:
 
-- Executar um `INSERT` na tabela `suppliers` com os 13 nomes
-- Todos serao criados com `is_active = true` (padrao)
-- Campos opcionais (telefone, email, endereco, contato) ficam vazios por enquanto
-- Sera usado o insert tool do banco de dados (nao migracoes, pois e insercao de dados)
+### 1. Mudar `tool_choice` de forçado para automático
+Trocar `tool_choice: { type: "function", function: { name: "register_purchase" } }` por `tool_choice: "auto"`. Isso permite que a IA decida **não** chamar a função quando os dados estão incompletos.
+
+### 2. Atualizar o prompt do sistema
+Instruir explicitamente a IA a **não** chamar a função se faltar quantidade ou valor total. Algo como: "Só chame register_purchase se a mensagem contiver explicitamente produto, quantidade E valor. Se faltar algum dado, NÃO chame a função."
+
+### 3. Validação pós-parse no código
+Após receber o resultado da IA, validar que `quantidade > 0` e `valor_total > 0` antes de prosseguir. Se inválido, pedir ao usuário que envie a mensagem completa com exemplo.
+
+### Arquivo a editar
+- `supabase/functions/webhook-zapi-purchase/index.ts`: prompt do sistema, `tool_choice`, e validação após `parseWithAI`.
 
