@@ -359,25 +359,25 @@ async function handleSupplierSelection(
     }
   }
 
+  // Supplier resolved — save and move to confirmation
+  await supabase.from("pending_whatsapp_purchases").update({
+    supplier_id: supplierId,
+    status: "awaiting_confirmation",
+  }).eq("id", pending.id);
+
   const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
 
-  const { error: insertError } = await insertPurchase(
-    supabase, pending.product_id, pending.quantity, pending.total_price, supplierId, pending.message_original
-  );
+  const unitPrice = pending.total_price / pending.quantity;
+  let msg = `🔍 *Confira os dados da compra:*\n\n`;
+  msg += `📦 *Produto:* ${product?.name}\n`;
+  msg += `📊 *Quantidade:* ${pending.quantity} ${pending.unit}\n`;
+  msg += `💰 *Valor total:* R$ ${pending.total_price.toFixed(2)}\n`;
+  msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${pending.unit}\n`;
+  if (supplierName) msg += `🏪 *Fornecedor:* ${supplierName}\n`;
+  msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
 
-  if (insertError) {
-    console.error("Insert error:", insertError);
-    await sendWhatsApp(phone, "❌ Erro ao registrar a compra.");
-    return { ok: false, error: "insert_failed" };
-  }
-
-  await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
-
-  await sendWhatsApp(phone, buildConfirmation(
-    product?.name || "Produto", pending.quantity, pending.unit, pending.total_price, supplierName
-  ));
-
-  return { ok: true, product: product?.name, supplier: supplierName };
+  await sendWhatsApp(phone, msg);
+  return { ok: true, awaiting_confirmation: true };
 }
 
 // --- Main handler ---
