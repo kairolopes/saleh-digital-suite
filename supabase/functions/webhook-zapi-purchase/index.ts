@@ -253,6 +253,30 @@ async function handleConfirmation(
   const answer = normalize(messageText);
 
   if (answer === "sim" || answer === "s" || answer === "1") {
+    // If supplier already identified, skip supplier selection and register directly
+    if (pending.supplier_id) {
+      const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
+      const { data: supplier } = await supabase.from("suppliers").select("name").eq("id", pending.supplier_id).single();
+
+      const { error: insertError } = await insertPurchase(
+        supabase, pending.product_id, pending.quantity, pending.total_price,
+        pending.supplier_id, pending.message_original
+      );
+
+      if (insertError) {
+        console.error("Insert error:", insertError);
+        await sendWhatsApp(phone, "❌ Erro ao registrar a compra.");
+        return { ok: false, error: "insert_failed" };
+      }
+
+      await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
+      await sendWhatsApp(phone, buildConfirmation(
+        product?.name || "Produto", pending.quantity, pending.unit, pending.total_price, supplier?.name || null
+      ));
+      return { ok: true, product: product?.name, supplier: supplier?.name };
+    }
+
+    // No supplier identified — ask user to choose
     await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pending.id);
 
     const suppliers = await getActiveSuppliers(supabase);
