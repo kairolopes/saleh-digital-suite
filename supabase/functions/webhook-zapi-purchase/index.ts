@@ -199,16 +199,36 @@ type Pending = {
 async function handleProductChoice(
   supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: Pending
 ) {
-  const num = parseInt(messageText.trim(), 10);
   const options: { id: string; name: string }[] = pending.product_options || [];
+  let chosen: { id: string; name: string } | null = null;
 
-  if (isNaN(num) || num < 1 || num > options.length) {
-    await sendWhatsApp(phone, `❌ Responda com o *número* do produto (1 a ${options.length}).`);
-    return { ok: true, awaiting_product_choice: true };
+  const num = parseInt(messageText.trim(), 10);
+  if (!isNaN(num) && num >= 1 && num <= options.length) {
+    chosen = options[num - 1];
+  } else {
+    // Semantic search against the available options
+    const scored = options
+      .map(o => ({ ...o, score: scoreProduct(messageText, o.name) }))
+      .filter(o => o.score >= 0.5)
+      .sort((a, b) => b.score - a.score);
+
+    if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= 0.15)) {
+      chosen = scored[0];
+    } else if (scored.length > 1) {
+      let msg = `🔍 Ainda ambíguo. Seja mais específico ou escolha pelo número:\n\n`;
+      options.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
+      msg += `\n_Responda com o número ou o nome._`;
+      await sendWhatsApp(phone, msg);
+      return { ok: true, awaiting_product_choice: true };
+    } else {
+      let msg = `❌ Não encontrei esse produto na lista. Escolha pelo número:\n\n`;
+      options.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
+      msg += `\n_Responda com o número ou o nome._`;
+      await sendWhatsApp(phone, msg);
+      return { ok: true, awaiting_product_choice: true };
+    }
   }
 
-  const chosen = options[num - 1];
-  // Update pending with chosen product and move to confirmation
   await supabase.from("pending_whatsapp_purchases").update({
     product_id: chosen.id,
     status: "awaiting_confirmation",
