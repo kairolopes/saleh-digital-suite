@@ -87,17 +87,18 @@ REGRA IMPORTANTE: So chame a funcao register_purchase se a mensagem contiver EXP
           type: "function",
           function: {
             name: "register_purchase",
-            description: "Registra dados de uma compra extraidos da mensagem. So chame se produto, quantidade e valor estiverem TODOS presentes na mensagem.",
+            description: "Registra dados de uma compra extraidos da mensagem. So chame se produto, quantidade e valor (total ou unitario) estiverem TODOS presentes.",
             parameters: {
               type: "object",
               properties: {
                 produto: { type: "string", description: "Nome do produto/insumo" },
                 quantidade: { type: "number", description: "Quantidade comprada" },
-                unidade: { type: "string", description: "Unidade (kg, un, L, g, ml)" },
-                valor_total: { type: "number", description: "Valor total pago em reais" },
-                fornecedor: { type: ["string", "null"], description: "Nome do fornecedor se mencionado" },
+                unidade: { type: "string", description: "Unidade: kg, un, L, g, ml, cx (caixa), fd (fardo), pct (pacote), dz (duzia), sc (saco), gl (galao), bd (balde), lta (lata), gf (garrafa)" },
+                valor_total: { type: "number", description: "Valor TOTAL pago em reais. Preencha se o usuario informou o total. Pode ser omitido se apenas o valor unitario foi informado." },
+                valor_unitario: { type: "number", description: "Valor por UNIDADE em reais (ex: 'a 2,50 o kg'). Preencha quando o usuario informou preco por unidade ao inves do total." },
+                fornecedor: { type: ["string", "null"], description: "Nome do fornecedor se mencionado na mensagem" },
               },
-              required: ["produto", "quantidade", "unidade", "valor_total"],
+              required: ["produto", "quantidade", "unidade"],
               additionalProperties: false,
             },
           },
