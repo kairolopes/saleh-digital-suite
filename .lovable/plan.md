@@ -1,24 +1,27 @@
 
 
-## Problema
+## Cadastrar 13 Fornecedores
 
-Quando o usuário envia "feijão carioca, 32kg, 33reais, tatico t9", a IA extrai o fornecedor corretamente e ele aparece na confirmação. Porém, ao confirmar com "Sim", o `handleConfirmation` (linha 255-256) **sempre** muda o status para `awaiting_supplier` e pede para escolher fornecedor novamente — ignorando completamente o fornecedor já identificado.
+Inserir os seguintes fornecedores na tabela `suppliers`:
 
-O fornecedor extraído pela IA (`parsed.fornecedor`) é exibido na mensagem de confirmação (linha 453), mas **nunca é salvo** na tabela `pending_whatsapp_purchases`. Então quando chega a confirmação, o sistema não tem como saber que já havia um fornecedor.
+1. Assai
+2. Tatico
+3. Armazem atacadista
+4. Ceasa
+5. Costa atacadao
+6. Dia a dia
+7. Swift
+8. Goias atacadista
+9. Comfrios
+10. Vr atacadista
+11. Cristal alimentos
+12. Vini lac
+13. Ancora alimentos
 
-## Solução
+### Detalhes tecnicos
 
-### 1. Salvar o fornecedor identificado na pendência
-- Quando a IA extrai um fornecedor (`parsed.fornecedor`), fazer matching semântico contra os fornecedores ativos usando `scoreProduct()`.
-- Se encontrar match confiante, salvar o `supplier_id` na tabela `pending_whatsapp_purchases`.
-- Adicionar coluna `supplier_id` à tabela `pending_whatsapp_purchases` (migração).
-
-### 2. Alterar `handleConfirmation`
-- Ao confirmar ("Sim"), verificar se já existe `supplier_id` na pendência.
-- Se sim: pular etapa de fornecedor → registrar compra direto.
-- Se não: seguir fluxo atual (pedir fornecedor).
-
-### 3. Arquivo a editar
-- `supabase/functions/webhook-zapi-purchase/index.ts`: bloco de inserção da pendência (linhas 441-445) e `handleConfirmation` (linhas 250-277).
-- Migração: adicionar `supplier_id uuid references suppliers(id)` à tabela `pending_whatsapp_purchases`.
+- Executar um `INSERT` na tabela `suppliers` com os 13 nomes
+- Todos serao criados com `is_active = true` (padrao)
+- Campos opcionais (telefone, email, endereco, contato) ficam vazios por enquanto
+- Sera usado o insert tool do banco de dados (nao migracoes, pois e insercao de dados)
 

@@ -193,7 +193,7 @@ function buildConfirmation(
 
 type Pending = {
   id: string; product_id: string; quantity: number; total_price: number;
-  unit: string; message_original: string; product_options: any;
+  unit: string; message_original: string; product_options: any; supplier_id: string | null;
 };
 
 async function handleProductChoice(
@@ -253,6 +253,30 @@ async function handleConfirmation(
   const answer = normalize(messageText);
 
   if (answer === "sim" || answer === "s" || answer === "1") {
+    // If supplier already identified, skip supplier selection and register directly
+    if (pending.supplier_id) {
+      const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
+      const { data: supplier } = await supabase.from("suppliers").select("name").eq("id", pending.supplier_id).single();
+
+      const { error: insertError } = await insertPurchase(
+        supabase, pending.product_id, pending.quantity, pending.total_price,
+        pending.supplier_id, pending.message_original
+      );
+
+      if (insertError) {
+        console.error("Insert error:", insertError);
+        await sendWhatsApp(phone, "❌ Erro ao registrar a compra.");
+        return { ok: false, error: "insert_failed" };
+      }
+
+      await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
+      await sendWhatsApp(phone, buildConfirmation(
+        product?.name || "Produto", pending.quantity, pending.unit, pending.total_price, supplier?.name || null
+      ));
+      return { ok: true, product: product?.name, supplier: supplier?.name };
+    }
+
+    // No supplier identified — ask user to choose
     await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pending.id);
 
     const suppliers = await getActiveSuppliers(supabase);
@@ -438,10 +462,23 @@ serve(async (req) => {
     if (isConfident && !isAmbiguous) {
       // Single confident match -> go to confirmation
       const product = candidates[0];
+      // Match supplier if extracted by AI
+      let matchedSupplierId: string | null = null;
+      if (parsed.fornecedor) {
+        const suppliers = await getActiveSuppliers(supabase);
+        const supplierScored = suppliers
+          .map(s => ({ ...s, score: scoreProduct(parsed.fornecedor!, s.name) }))
+          .filter(s => s.score >= 0.5)
+          .sort((a, b) => b.score - a.score);
+        if (supplierScored.length === 1 || (supplierScored.length > 1 && supplierScored[0].score - supplierScored[1].score >= 0.15)) {
+          matchedSupplierId = supplierScored[0].id;
+        }
+      }
+
       await supabase.from("pending_whatsapp_purchases").insert({
         phone, product_id: product.id, quantity: parsed.quantidade,
         total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
-        status: "awaiting_confirmation",
+        status: "awaiting_confirmation", supplier_id: matchedSupplierId,
       });
 
       const unitPrice = parsed.valor_total / parsed.quantidade;
@@ -461,11 +498,25 @@ serve(async (req) => {
       // Ambiguous or low confidence -> ask user to choose product
       const options = closeRunners.slice(0, 5); // max 5 options
 
+      // Reuse matchedSupplierId from above (supplier matching already done for confident path)
+      let ambiguousSupplierId: string | null = null;
+      if (parsed.fornecedor) {
+        const suppliers = await getActiveSuppliers(supabase);
+        const supplierScored = suppliers
+          .map(s => ({ ...s, score: scoreProduct(parsed.fornecedor!, s.name) }))
+          .filter(s => s.score >= 0.5)
+          .sort((a, b) => b.score - a.score);
+        if (supplierScored.length === 1 || (supplierScored.length > 1 && supplierScored[0].score - supplierScored[1].score >= 0.15)) {
+          ambiguousSupplierId = supplierScored[0].id;
+        }
+      }
+
       await supabase.from("pending_whatsapp_purchases").insert({
         phone, product_id: options[0].id, quantity: parsed.quantidade,
         total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
         status: "awaiting_product_choice",
         product_options: options.map(o => ({ id: o.id, name: o.name })),
+        supplier_id: ambiguousSupplierId,
       });
 
       let msg = `🔍 Encontrei mais de um produto parecido com "*${parsed.produto}*".\n\n`;
