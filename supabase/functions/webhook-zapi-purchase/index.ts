@@ -53,7 +53,7 @@ async function parseWithAI(messageText: string) {
           role: "system",
           content: `Voce extrai dados de compras de insumos de restaurante a partir de mensagens em portugues.
 Extraia: produto, quantidade, unidade (kg, un, L, g, ml, etc), valor_total, fornecedor (se mencionado).
-Use tool calling para retornar os dados estruturados. Se a mensagem nao for sobre compra, retorne null.`,
+REGRA IMPORTANTE: So chame a funcao register_purchase se a mensagem contiver EXPLICITAMENTE os tres dados: produto, quantidade E valor/preco. Se faltar qualquer um desses dados, NAO chame a funcao. Exemplos que NAO devem chamar a funcao: "arroz", "10kg arroz", "arroz 60 reais". Exemplo valido: "10kg arroz 60 reais".`,
         },
         { role: "user", content: messageText },
       ],
@@ -62,7 +62,7 @@ Use tool calling para retornar os dados estruturados. Se a mensagem nao for sobr
           type: "function",
           function: {
             name: "register_purchase",
-            description: "Registra dados de uma compra extraidos da mensagem",
+            description: "Registra dados de uma compra extraidos da mensagem. So chame se produto, quantidade e valor estiverem TODOS presentes na mensagem.",
             parameters: {
               type: "object",
               properties: {
@@ -78,7 +78,7 @@ Use tool calling para retornar os dados estruturados. Se a mensagem nao for sobr
           },
         },
       ],
-      tool_choice: { type: "function", function: { name: "register_purchase" } },
+      tool_choice: "auto",
     }),
   });
 
@@ -251,8 +251,8 @@ serve(async (req) => {
 
     // 2. Parse new purchase with AI
     const parsed = await parseWithAI(messageText);
-    if (!parsed) {
-      await sendWhatsApp(phone, "❌ Não consegui entender a mensagem como uma compra. Envie no formato:\n\n_10kg arroz 60 reais_\n_5 unidades alho 15_");
+    if (!parsed || !parsed.quantidade || parsed.quantidade <= 0 || !parsed.valor_total || parsed.valor_total <= 0) {
+      await sendWhatsApp(phone, "❌ Não consegui identificar todos os dados da compra. Envie no formato:\n\n_10kg arroz 60 reais_\n_5 unidades alho 15_\n\nInforme *produto*, *quantidade* e *valor*.");
       return new Response(JSON.stringify({ ok: true, not_purchase: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
