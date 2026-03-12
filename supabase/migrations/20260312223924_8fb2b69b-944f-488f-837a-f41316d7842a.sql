@@ -1,0 +1,1 @@
+ALTER TABLE public.pending_whatsapp_purchases ADD COLUMN product_options jsonb DEFAULT NULL;
