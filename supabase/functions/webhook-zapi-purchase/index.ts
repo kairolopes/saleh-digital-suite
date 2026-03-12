@@ -273,10 +273,19 @@ serve(async (req) => {
       .limit(1);
 
     if (pendingList?.length) {
-      const result = await handleSupplierSelection(supabase, phone, messageText, pendingList[0]);
-      return new Response(JSON.stringify(result), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      const pending = pendingList[0];
+      if (pending.status === "awaiting_confirmation") {
+        const result = await handleConfirmation(supabase, phone, messageText, pending);
+        return new Response(JSON.stringify(result), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (pending.status === "awaiting_supplier") {
+        const result = await handleSupplierSelection(supabase, phone, messageText, pending);
+        return new Response(JSON.stringify(result), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // 2. Parse new purchase with AI
