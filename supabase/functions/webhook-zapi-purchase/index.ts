@@ -471,7 +471,7 @@ serve(async (req) => {
       let msg = `🔍 Encontrei mais de um produto parecido com "*${parsed.produto}*".\n\n`;
       msg += `📋 *Qual é o produto correto?*\n`;
       options.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
-      msg += `\n_Responda com o número._`;
+      msg += `\n_Responda com o número ou o nome._`;
 
       await sendWhatsApp(phone, msg);
       return new Response(JSON.stringify({ ok: true, awaiting_product_choice: true, candidates: options.map(o => o.name) }), {
