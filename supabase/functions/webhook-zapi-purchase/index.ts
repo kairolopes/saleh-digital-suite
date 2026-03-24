@@ -288,7 +288,7 @@ async function handleProductChoice(
   msg += `💰 *Valor total:* R$ ${pending.total_price.toFixed(2)}\n`;
   msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${pending.unit}\n`;
   if (supplier?.name) msg += `🏪 *Fornecedor:* ${supplier.name}\n`;
-  msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
+  msg += `\n✅ *1* - Confirmar | *2* - Cancelar`;
 
   await sendWhatsApp(phone, msg);
   return { ok: true, awaiting_confirmation: true };
@@ -326,13 +326,13 @@ async function handleConfirmation(
     return { ok: true, product: product?.name, supplier: supplierName };
   }
 
-  if (answer === "nao" || answer === "n" || answer === "não" || answer === "0") {
+  if (answer === "nao" || answer === "n" || answer === "não" || answer === "2" || answer === "0") {
     await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
     await sendWhatsApp(phone, "❌ Compra cancelada. Envie novamente com os dados corretos.");
     return { ok: true, cancelled: true };
   }
 
-  await sendWhatsApp(phone, "🔄 Responda *Sim* para confirmar ou *Não* para cancelar.");
+  await sendWhatsApp(phone, "🔄 Responda *1* para confirmar ou *2* para cancelar.");
   return { ok: true, awaiting_confirmation: true };
 }
 
@@ -399,7 +399,7 @@ async function handleSupplierSelection(
   msg += `💰 *Valor total:* R$ ${pending.total_price.toFixed(2)}\n`;
   msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${pending.unit}\n`;
   if (supplierName) msg += `🏪 *Fornecedor:* ${supplierName}\n`;
-  msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
+  msg += `\n✅ *1* - Confirmar | *2* - Cancelar`;
 
   await sendWhatsApp(phone, msg);
   return { ok: true, awaiting_confirmation: true };
@@ -547,7 +547,7 @@ serve(async (req) => {
       msg += `💰 *Valor total:* R$ ${parsed.valor_total.toFixed(2)}\n`;
       msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${parsed.unidade}\n`;
       if (matchedSupplierName) msg += `🏪 *Fornecedor:* ${matchedSupplierName}\n`;
-      msg += `\n✅ Responda *Sim* para confirmar ou *Não* para cancelar.`;
+      msg += `\n✅ *1* - Confirmar | *2* - Cancelar`;
 
       await sendWhatsApp(phone, msg);
       return new Response(JSON.stringify({ ok: true, awaiting_confirmation: true, product: product.name }), {
