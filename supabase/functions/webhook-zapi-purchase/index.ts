@@ -643,6 +643,7 @@ serve(async (req) => {
     }
 
     console.log("Parsed:", JSON.stringify(parsed));
+    const originalMessage = isImageMessage ? `[FOTO] ${imageCaption || parsed.produto}` : messageText;
 
     // 3. Find product candidates
     const candidates = await findProducts(supabase, parsed.produto);
