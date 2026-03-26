@@ -1,1 +1,0 @@
-ALTER TABLE public.suppliers ADD COLUMN cnpj text;
