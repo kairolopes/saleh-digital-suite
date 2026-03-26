@@ -562,8 +562,17 @@ serve(async (req) => {
 
     const messageText = body.text?.message || body.message?.text || body.text || "";
     const phone = body.phone || body.from || "";
-    if (!messageText || !phone) {
+    const imageUrl = body.image?.imageUrl || body.imageUrl || null;
+    const imageCaption = body.image?.caption || body.caption || "";
+    const isImageMessage = !!imageUrl;
+
+    if (!messageText && !isImageMessage) {
       return new Response(JSON.stringify({ ok: true, no_content: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!phone) {
+      return new Response(JSON.stringify({ ok: true, no_phone: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
