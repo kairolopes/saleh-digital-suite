@@ -45,6 +45,54 @@ function formatCnpj(value: string): string {
   return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
 }
 
+export default function Fornecedores() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    cnpj: '',
+    contact_name: '',
+    phone: '',
+    email: '',
+    address: '',
+    notes: '',
+  });
+
+  const handleCnpjLookup = async () => {
+    const cleanCnpj = formData.cnpj.replace(/\D/g, '');
+    if (cleanCnpj.length !== 14) {
+      toast({ title: 'CNPJ inválido', description: 'Digite um CNPJ com 14 dígitos', variant: 'destructive' });
+      return;
+    }
+    setCnpjLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('cnpj-lookup', {
+        body: { cnpj: cleanCnpj },
+      });
+      if (error) throw error;
+      if (data?.error) {
+        toast({ title: 'Erro na consulta', description: data.error, variant: 'destructive' });
+        return;
+      }
+      setFormData(f => ({
+        ...f,
+        name: data.name || f.name,
+        phone: data.phone || f.phone,
+        email: data.email || f.email,
+        address: data.address || f.address,
+      }));
+      toast({ title: '✅ Dados preenchidos!', description: `Empresa: ${data.razao_social || data.name}` });
+    } catch (err: any) {
+      toast({ title: 'Erro ao consultar CNPJ', description: err.message, variant: 'destructive' });
+    } finally {
+      setCnpjLoading(false);
+    }
+  };
+
   const { data: suppliers, isLoading } = useQuery({
     queryKey: ['suppliers'],
     queryFn: async () => {
