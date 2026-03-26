@@ -132,6 +132,7 @@ export default function Fornecedores() {
     mutationFn: async ({ id, data }: { id: string; data: typeof formData }) => {
       const { error } = await supabase.from('suppliers').update({
         name: data.name,
+        cnpj: data.cnpj?.replace(/\D/g, '') || null,
         contact_name: data.contact_name || null,
         phone: data.phone || null,
         email: data.email || null,
@@ -230,6 +231,28 @@ export default function Fornecedores() {
                     placeholder="Nome do fornecedor"
                     required
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cnpj">CNPJ</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="cnpj"
+                      value={formData.cnpj}
+                      onChange={(e) => setFormData(f => ({ ...f, cnpj: formatCnpj(e.target.value) }))}
+                      placeholder="00.000.000/0000-00"
+                      maxLength={18}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={handleCnpjLookup}
+                      disabled={cnpjLoading || formData.cnpj.replace(/\D/g, '').length !== 14}
+                      title="Buscar dados pelo CNPJ"
+                    >
+                      {cnpjLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    </Button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
