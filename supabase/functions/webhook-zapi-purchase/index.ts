@@ -267,7 +267,7 @@ async function handleProductChoice(
     let msg = `✅ Produto: *${chosen.name}*\n\n`;
     msg += `🏪 *Escolha o fornecedor:*\n`;
     suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-    msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
+    msg += `\n_Responda com o número ou o nome._`;
 
     await sendWhatsApp(phone, msg);
     return { ok: true, awaiting_supplier: true };
@@ -300,7 +300,16 @@ async function handleConfirmation(
   const answer = normalize(messageText);
 
   if (answer === "sim" || answer === "s" || answer === "1") {
-    // At this point, supplier should already be resolved (or intentionally null/nenhum)
+    // Fornecedor é obrigatório — se não tem, redirecionar
+    if (!pending.supplier_id) {
+      const suppliers = await getActiveSuppliers(supabase);
+      await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pending.id);
+      let msg = `⚠️ *Fornecedor obrigatório!*\n\n🏪 *Escolha o fornecedor:*\n`;
+      suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      msg += `\n_Responda com o número ou o nome._`;
+      await sendWhatsApp(phone, msg);
+      return { ok: true, awaiting_supplier: true };
+    }
     const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
     let supplierName: string | null = null;
     if (pending.supplier_id) {
@@ -344,44 +353,53 @@ async function handleSupplierSelection(
   let supplierName: string | null = null;
 
   const answer = normalize(messageText);
-  if (answer === "nenhum" || answer === "nenhuma" || answer === "sem fornecedor") {
-    // Treat as "0"
-  } else {
-    const num = parseInt(messageText.trim(), 10);
-    if (!isNaN(num) && num >= 0) {
-      if (num === 0) {
-        // No supplier
-      } else if (num > suppliers.length) {
-        await sendWhatsApp(phone, `❌ Número inválido. Escolha de 0 a ${suppliers.length}.`);
-        return { ok: true, awaiting_supplier: true };
-      } else {
-        supplierId = suppliers[num - 1].id;
-        supplierName = suppliers[num - 1].name;
-      }
+  const num = parseInt(messageText.trim(), 10);
+  if (!isNaN(num) && num >= 1) {
+    if (num > suppliers.length) {
+      await sendWhatsApp(phone, `❌ Número inválido. Escolha de 1 a ${suppliers.length}.`);
+      return { ok: true, awaiting_supplier: true };
     } else {
-      // Semantic search against suppliers
-      const scored = suppliers
-        .map(s => ({ ...s, score: scoreProduct(messageText, s.name) }))
-        .filter(s => s.score >= 0.5)
-        .sort((a, b) => b.score - a.score);
-
-      if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= 0.15)) {
-        supplierId = scored[0].id;
-        supplierName = scored[0].name;
-      } else if (scored.length > 1) {
-        let msg = `🔍 Encontrei mais de um fornecedor parecido. Escolha pelo número:\n\n`;
-        suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-        msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
-        await sendWhatsApp(phone, msg);
-        return { ok: true, awaiting_supplier: true };
-      } else {
-        let msg = `❌ Fornecedor não encontrado. Escolha pelo número:\n\n`;
-        suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-        msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
-        await sendWhatsApp(phone, msg);
-        return { ok: true, awaiting_supplier: true };
-      }
+      supplierId = suppliers[num - 1].id;
+      supplierName = suppliers[num - 1].name;
     }
+  } else if (!isNaN(num) && num === 0) {
+    // Fornecedor obrigatório — não aceitar 0
+    let msg = `⚠️ *Fornecedor obrigatório!* Escolha pelo número:\n\n`;
+    suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+    msg += `\n_Responda com o número ou o nome._`;
+    await sendWhatsApp(phone, msg);
+    return { ok: true, awaiting_supplier: true };
+  } else {
+    // Semantic search against suppliers
+    const scored = suppliers
+      .map(s => ({ ...s, score: scoreProduct(messageText, s.name) }))
+      .filter(s => s.score >= 0.5)
+      .sort((a, b) => b.score - a.score);
+
+    if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= 0.15)) {
+      supplierId = scored[0].id;
+      supplierName = scored[0].name;
+    } else if (scored.length > 1) {
+      let msg = `🔍 Encontrei mais de um fornecedor parecido. Escolha pelo número:\n\n`;
+      suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      msg += `\n_Responda com o número ou o nome._`;
+      await sendWhatsApp(phone, msg);
+      return { ok: true, awaiting_supplier: true };
+    } else {
+      let msg = `❌ Fornecedor não encontrado. Escolha pelo número:\n\n`;
+      suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      msg += `\n_Responda com o número ou o nome._`;
+      await sendWhatsApp(phone, msg);
+      return { ok: true, awaiting_supplier: true };
+    }
+  }
+
+  if (!supplierId) {
+    let msg = `⚠️ *Fornecedor obrigatório!* Escolha pelo número:\n\n`;
+    suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+    msg += `\n_Responda com o número ou o nome._`;
+    await sendWhatsApp(phone, msg);
+    return { ok: true, awaiting_supplier: true };
   }
 
   // Supplier resolved — save and move to confirmation
@@ -525,7 +543,7 @@ serve(async (req) => {
         msg += `❓ Fornecedor "*${parsed.fornecedor}*" não encontrado no sistema.\n\n`;
         msg += `🏪 *Escolha o fornecedor:*\n`;
         suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-        msg += `0 - Nenhum\n\n_Responda com o número ou o nome._`;
+        msg += `\n_Responda com o número ou o nome._`;
 
         await sendWhatsApp(phone, msg);
         return new Response(JSON.stringify({ ok: true, awaiting_supplier: true, product: product.name }), {
@@ -533,7 +551,29 @@ serve(async (req) => {
         });
       }
 
-      // Supplier resolved (or not mentioned) → go to confirmation with all data
+      if (!matchedSupplierId) {
+        // Fornecedor obrigatório — perguntar antes de confirmar
+        await supabase.from("pending_whatsapp_purchases").insert({
+          phone, product_id: product.id, quantity: parsed.quantidade,
+          total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+          status: "awaiting_supplier", supplier_id: null,
+        });
+
+        const suppliers = await getActiveSuppliers(supabase);
+        let msg = `✅ Produto: *${product.name}*\n`;
+        msg += `📊 Quantidade: ${parsed.quantidade} ${parsed.unidade}\n`;
+        msg += `💰 Valor: R$ ${parsed.valor_total.toFixed(2)}\n\n`;
+        msg += `🏪 *Escolha o fornecedor:*\n`;
+        suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+        msg += `\n_Responda com o número ou o nome._`;
+
+        await sendWhatsApp(phone, msg);
+        return new Response(JSON.stringify({ ok: true, awaiting_supplier: true, product: product.name }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Supplier resolved → go to confirmation with all data
       await supabase.from("pending_whatsapp_purchases").insert({
         phone, product_id: product.id, quantity: parsed.quantidade,
         total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
@@ -546,7 +586,7 @@ serve(async (req) => {
       msg += `📊 *Quantidade:* ${parsed.quantidade} ${parsed.unidade}\n`;
       msg += `💰 *Valor total:* R$ ${parsed.valor_total.toFixed(2)}\n`;
       msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${parsed.unidade}\n`;
-      if (matchedSupplierName) msg += `🏪 *Fornecedor:* ${matchedSupplierName}\n`;
+      msg += `🏪 *Fornecedor:* ${matchedSupplierName}\n`;
       msg += `\n✅ *1* - Confirmar | *2* - Cancelar`;
 
       await sendWhatsApp(phone, msg);
