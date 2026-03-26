@@ -11,11 +11,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Pencil, Truck, Search } from 'lucide-react';
+import { Plus, Pencil, Truck, Search, Loader2 } from 'lucide-react';
 import { z } from 'zod';
 
 const supplierSchema = z.object({
   name: z.string().min(2, 'Nome deve ter no mínimo 2 caracteres').max(100),
+  cnpj: z.string().max(18).optional(),
   contact_name: z.string().max(100).optional(),
   phone: z.string().max(20).optional(),
   email: z.string().email('Email inválido').optional().or(z.literal('')),
@@ -26,6 +27,7 @@ const supplierSchema = z.object({
 type Supplier = {
   id: string;
   name: string;
+  cnpj: string | null;
   contact_name: string | null;
   phone: string | null;
   email: string | null;
@@ -34,20 +36,62 @@ type Supplier = {
   is_active: boolean;
 };
 
+function formatCnpj(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 14);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
+
 export default function Fornecedores() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [cnpjLoading, setCnpjLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
+    cnpj: '',
     contact_name: '',
     phone: '',
     email: '',
     address: '',
     notes: '',
   });
+
+  const handleCnpjLookup = async () => {
+    const cleanCnpj = formData.cnpj.replace(/\D/g, '');
+    if (cleanCnpj.length !== 14) {
+      toast({ title: 'CNPJ inválido', description: 'Digite um CNPJ com 14 dígitos', variant: 'destructive' });
+      return;
+    }
+    setCnpjLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('cnpj-lookup', {
+        body: { cnpj: cleanCnpj },
+      });
+      if (error) throw error;
+      if (data?.error) {
+        toast({ title: 'Erro na consulta', description: data.error, variant: 'destructive' });
+        return;
+      }
+      setFormData(f => ({
+        ...f,
+        name: data.name || f.name,
+        phone: data.phone || f.phone,
+        email: data.email || f.email,
+        address: data.address || f.address,
+      }));
+      toast({ title: '✅ Dados preenchidos!', description: `Empresa: ${data.razao_social || data.name}` });
+    } catch (err: any) {
+      toast({ title: 'Erro ao consultar CNPJ', description: err.message, variant: 'destructive' });
+    } finally {
+      setCnpjLoading(false);
+    }
+  };
 
   const { data: suppliers, isLoading } = useQuery({
     queryKey: ['suppliers'],
@@ -65,6 +109,7 @@ export default function Fornecedores() {
     mutationFn: async (data: typeof formData) => {
       const { error } = await supabase.from('suppliers').insert([{
         name: data.name,
+        cnpj: data.cnpj?.replace(/\D/g, '') || null,
         contact_name: data.contact_name || null,
         phone: data.phone || null,
         email: data.email || null,
@@ -87,6 +132,7 @@ export default function Fornecedores() {
     mutationFn: async ({ id, data }: { id: string; data: typeof formData }) => {
       const { error } = await supabase.from('suppliers').update({
         name: data.name,
+        cnpj: data.cnpj?.replace(/\D/g, '') || null,
         contact_name: data.contact_name || null,
         phone: data.phone || null,
         email: data.email || null,
@@ -117,7 +163,7 @@ export default function Fornecedores() {
   });
 
   const resetForm = () => {
-    setFormData({ name: '', contact_name: '', phone: '', email: '', address: '', notes: '' });
+    setFormData({ name: '', cnpj: '', contact_name: '', phone: '', email: '', address: '', notes: '' });
     setEditingSupplier(null);
     setIsDialogOpen(false);
   };
@@ -140,6 +186,7 @@ export default function Fornecedores() {
     setEditingSupplier(supplier);
     setFormData({
       name: supplier.name,
+      cnpj: supplier.cnpj ? formatCnpj(supplier.cnpj) : '',
       contact_name: supplier.contact_name || '',
       phone: supplier.phone || '',
       email: supplier.email || '',
@@ -184,6 +231,28 @@ export default function Fornecedores() {
                     placeholder="Nome do fornecedor"
                     required
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cnpj">CNPJ</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="cnpj"
+                      value={formData.cnpj}
+                      onChange={(e) => setFormData(f => ({ ...f, cnpj: formatCnpj(e.target.value) }))}
+                      placeholder="00.000.000/0000-00"
+                      maxLength={18}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={handleCnpjLookup}
+                      disabled={cnpjLoading || formData.cnpj.replace(/\D/g, '').length !== 14}
+                      title="Buscar dados pelo CNPJ"
+                    >
+                      {cnpjLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    </Button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
