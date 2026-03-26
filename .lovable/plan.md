@@ -2,29 +2,28 @@
 
 ## Problema
 
-Quando o fornecedor já foi identificado pela IA (ex: "tatico t9"), a confirmação final mostra "Sim/Não", mas o usuário quer que o fornecedor também seja explicitamente confirmado antes do registro. Além disso, trocar "Sim/Não" por "1/2" em todas as confirmações.
+Atualmente, se o usuário não menciona fornecedor na mensagem, o fluxo pula direto para confirmação sem perguntar. O fornecedor deve ser **obrigatório** — sempre perguntar antes de confirmar.
 
 ## Solução
 
-### 1. Trocar "Sim/Não" por "1/2" em todas as mensagens de confirmação
+Editar `supabase/functions/webhook-zapi-purchase/index.ts` em 3 pontos:
 
-Locais a alterar no arquivo `supabase/functions/webhook-zapi-purchase/index.ts`:
+### 1. Fluxo com produto confiante (linha 536-554)
+Quando o fornecedor NÃO foi mencionado (`!parsed.fornecedor`), atualmente vai direto para `awaiting_confirmation`. Mudar para `awaiting_supplier` e mostrar a lista de fornecedores.
 
-- **Linha 291, 402, 550**: Trocar `✅ Responda *Sim* para confirmar ou *Não* para cancelar.` por `✅ *1* - Confirmar | *2* - Cancelar`
-- **Linha 335**: Mensagem de "responda Sim ou Não" → `Responda *1* para confirmar ou *2* para cancelar.`
+### 2. `handleProductChoice` (linha 276-294)
+Quando o produto é escolhido e `supplier_id` já existe, vai para confirmação. Mas quando não existe, já vai para `awaiting_supplier` (linha 258-273). Isso já está correto — só garantir que o supplier_id nunca esteja preenchido se não foi confirmado.
 
-### 2. Atualizar `handleConfirmation` para aceitar 1/2
+### 3. `handleSupplierSelection` — remover opção "0 - Nenhum"
+Nas linhas 270, 374, 380: remover a opção `0 - Nenhum` já que fornecedor é obrigatório. Ajustar a validação para não aceitar `num === 0`. Também remover o tratamento de "nenhum"/"sem fornecedor" (linhas 347-348).
 
-- **Linha 302**: `answer === "sim" || answer === "s" || answer === "1"` → manter "1", adicionar que "sim"/"s" continuam funcionando (retrocompatibilidade)
-- **Linha 329**: `answer === "nao" || ... || answer === "0"` → trocar "0" por "2", manter "nao"/"não"/"n" como alternativas
+### 4. Confirmação sem fornecedor
+Na `handleConfirmation` (linha 302-326): se `supplier_id` for null, não permitir confirmar — redirecionar para escolha de fornecedor.
 
-### 3. Forçar confirmação do fornecedor
-
-Quando o fornecedor é identificado automaticamente pela IA (ex: `matchedSupplierId` não é null na linha 509-512), o fluxo atual pula direto para confirmação geral. A mudança:
-
-- **Não pular a etapa de fornecedor**: mesmo quando a IA identifica o fornecedor, incluir na mensagem de confirmação o fornecedor com destaque, e o "1/2" já cobre a confirmação de tudo junto.
-- Na verdade o fluxo já mostra o fornecedor na confirmação (linha 549). Com a troca para 1/2, o usuário confirma tudo (incluindo fornecedor) de uma vez. Isso já resolve — o fornecedor aparece no resumo e o usuário confirma com "1".
-
-### Arquivo a editar
-- `supabase/functions/webhook-zapi-purchase/index.ts`: ~6 pontos de troca de texto "Sim/Não" → "1/2" e ajuste no `handleConfirmation` para aceitar "2" como cancelamento.
+### Resumo das mudanças
+- **Linha 270, 374, 380**: Remover "0 - Nenhum"
+- **Linha 347-348**: Remover tratamento de "nenhum"/"sem fornecedor"  
+- **Linha 352-353**: Rejeitar `num === 0`
+- **Linha 536-554**: Quando não tem fornecedor, ir para `awaiting_supplier` em vez de `awaiting_confirmation`
+- Tudo no arquivo `supabase/functions/webhook-zapi-purchase/index.ts`
 
