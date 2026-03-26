@@ -64,6 +64,126 @@ async function sendWhatsApp(phone: string, message: string) {
   console.log("Z-API send-text response:", resp.status, await resp.text());
 }
 
+async function downloadImageAsBase64(imageUrl: string): Promise<{ base64: string; mimeType: string } | null> {
+  try {
+    const resp = await fetch(imageUrl);
+    if (!resp.ok) {
+      console.error("Failed to download image:", resp.status);
+      return null;
+    }
+    const contentType = resp.headers.get("content-type") || "image/jpeg";
+    const buffer = await resp.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+    return { base64, mimeType: contentType.split(";")[0] };
+  } catch (err) {
+    console.error("Image download error:", err);
+    return null;
+  }
+}
+
+async function parseImageWithAI(imageBase64: string, mimeType: string, caption?: string): Promise<{
+  produto: string; quantidade: number; unidade: string; valor_total: number; fornecedor: string | null;
+} | null> {
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
+
+  const userContent: any[] = [
+    {
+      type: "image_url",
+      image_url: { url: `data:${mimeType};base64,${imageBase64}` },
+    },
+    {
+      type: "text",
+      text: caption
+        ? `Analise esta imagem de compra/nota fiscal. O usuário também disse: "${caption}". Extraia os dados de compra.`
+        : "Analise esta imagem de compra/nota fiscal/recibo. Extraia os dados de compra visíveis.",
+    },
+  ];
+
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      messages: [
+        {
+          role: "system",
+          content: `Voce e um assistente que extrai dados de compras de insumos de restaurante a partir de FOTOS de notas fiscais, cupons, recibos ou comprovantes.
+
+OBJETIVO: Extrair produto(s), quantidade, unidade e valor da imagem.
+
+REGRAS:
+- Se a imagem contiver MULTIPLOS itens, extraia o item PRINCIPAL ou de MAIOR valor.
+- Se houver dados claros de fornecedor (nome da loja/empresa), extraia tambem.
+- Interprete abreviacoes: cx = caixa, fd = fardo, pct = pacote, un = unidade, kg, L, g, ml, dz = duzia, sc = saco
+- Use virgula como separador decimal brasileiro: "2,50" = 2.50
+- Se a imagem nao for de uma compra/nota, NAO chame a funcao.
+- Se os dados estiverem ilegíveis ou incompletos, NAO chame a funcao.
+
+IMPORTANTE: So chame a funcao se conseguir identificar produto, quantidade E valor na imagem.`,
+        },
+        { role: "user", content: userContent },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "register_purchase",
+            description: "Registra dados de uma compra extraidos da imagem. So chame se produto, quantidade e valor estiverem TODOS visiveis.",
+            parameters: {
+              type: "object",
+              properties: {
+                produto: { type: "string", description: "Nome do produto/insumo principal" },
+                quantidade: { type: "number", description: "Quantidade comprada" },
+                unidade: { type: "string", description: "Unidade: kg, un, L, g, ml, cx, fd, pct, dz, sc, gl, bd, lta, gf" },
+                valor_total: { type: "number", description: "Valor TOTAL pago em reais" },
+                valor_unitario: { type: "number", description: "Valor por unidade se visivel" },
+                fornecedor: { type: ["string", "null"], description: "Nome do fornecedor/loja se visivel na nota" },
+                descricao_imagem: { type: "string", description: "Breve descricao do que foi visto na imagem para feedback ao usuario" },
+              },
+              required: ["produto", "quantidade", "unidade", "descricao_imagem"],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+      tool_choice: "auto",
+    }),
+  });
+
+  if (!response.ok) {
+    console.error("AI vision error:", response.status, await response.text());
+    return null;
+  }
+
+  const data = await response.json();
+  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+  if (!toolCall) return null;
+
+  try {
+    const raw = JSON.parse(toolCall.function.arguments) as {
+      produto: string; quantidade: number; unidade: string;
+      valor_total?: number; valor_unitario?: number; fornecedor?: string | null;
+      descricao_imagem?: string;
+    };
+    if (!raw.valor_total && raw.valor_unitario && raw.quantidade) {
+      raw.valor_total = raw.valor_unitario * raw.quantidade;
+    }
+    if (!raw.valor_total || raw.valor_total <= 0) return null;
+    return { ...raw, valor_total: raw.valor_total, fornecedor: raw.fornecedor ?? null } as {
+      produto: string; quantidade: number; unidade: string; valor_total: number; fornecedor: string | null;
+    };
+  } catch {
+    console.error("Failed to parse AI vision response:", toolCall.function.arguments);
+    return null;
+  }
+}
+
 async function parseWithAI(messageText: string) {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
