@@ -454,9 +454,37 @@ export type Database = {
           },
         ]
       }
+      product_categories: {
+        Row: {
+          color: string | null
+          created_at: string | null
+          display_order: number | null
+          id: string
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string | null
+          display_order?: number | null
+          id?: string
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          color?: string | null
+          created_at?: string | null
+          display_order?: number | null
+          id?: string
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       products: {
         Row: {
           average_price: number | null
+          category_id: string | null
           created_at: string | null
           current_quantity: number | null
           default_supplier_id: string | null
@@ -470,6 +498,7 @@ export type Database = {
         }
         Insert: {
           average_price?: number | null
+          category_id?: string | null
           created_at?: string | null
           current_quantity?: number | null
           default_supplier_id?: string | null
@@ -483,6 +512,7 @@ export type Database = {
         }
         Update: {
           average_price?: number | null
+          category_id?: string | null
           created_at?: string | null
           current_quantity?: number | null
           default_supplier_id?: string | null
@@ -495,6 +525,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "products_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "product_categories"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "products_default_supplier_id_fkey"
             columns: ["default_supplier_id"]
