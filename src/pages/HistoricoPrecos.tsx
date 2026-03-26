@@ -254,21 +254,21 @@ export default function HistoricoPrecos() {
                       <AreaChart data={chartData}>
                         <defs>
                           <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                            <stop offset="5%" stopColor="#e07b20" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#e07b20" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0dbd4" />
+                        <XAxis dataKey="date" stroke="#7a7168" fontSize={12} />
                         <YAxis 
-                          stroke="hsl(var(--muted-foreground))" 
+                          stroke="#7a7168" 
                           fontSize={12}
                           tickFormatter={(v) => `R$${v.toFixed(2)}`}
                         />
                         <Tooltip 
                           contentStyle={{ 
-                            backgroundColor: 'hsl(var(--card))', 
-                            border: '1px solid hsl(var(--border))',
+                            backgroundColor: '#ffffff', 
+                            border: '1px solid #e0dbd4',
                             borderRadius: '8px',
                           }}
                           formatter={(value: number) => [formatCurrency(value), 'Preço']}
@@ -277,7 +277,7 @@ export default function HistoricoPrecos() {
                         <Area 
                           type="monotone" 
                           dataKey="price" 
-                          stroke="hsl(var(--primary))" 
+                          stroke="#e07b20" 
                           fillOpacity={1} 
                           fill="url(#colorPrice)"
                           strokeWidth={2}

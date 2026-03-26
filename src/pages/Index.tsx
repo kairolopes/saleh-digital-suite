@@ -8,7 +8,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
-const COLORS = ['hsl(var(--primary))', 'hsl(var(--info))', 'hsl(var(--warning))', 'hsl(var(--success))', 'hsl(var(--destructive))'];
+const COLORS = ['#e07b20', '#0ea5e9', '#f59e0b', '#22c55e', '#ef4444'];
 
 export default function Index() {
   const { user } = useAuth();
@@ -283,16 +283,16 @@ export default function Index() {
                     <Tooltip 
                       formatter={(value: number) => [formatCurrency(value), 'Vendas']}
                       contentStyle={{ 
-                        backgroundColor: 'hsl(var(--card))', 
-                        border: '1px solid hsl(var(--border))',
+                        backgroundColor: '#ffffff', 
+                        border: '1px solid #e0dbd4',
                         borderRadius: '8px'
                       }}
                     />
                     <Area 
                       type="monotone" 
                       dataKey="vendas" 
-                      stroke="hsl(var(--primary))" 
-                      fill="hsl(var(--primary) / 0.2)" 
+                      stroke="#e07b20" 
+                      fill="rgba(224, 123, 32, 0.2)" 
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -323,12 +323,12 @@ export default function Index() {
                     <Tooltip 
                       formatter={(value: number) => [formatCurrency(value), 'Custos']}
                       contentStyle={{ 
-                        backgroundColor: 'hsl(var(--card))', 
-                        border: '1px solid hsl(var(--border))',
+                        backgroundColor: '#ffffff', 
+                        border: '1px solid #e0dbd4',
                         borderRadius: '8px'
                       }}
                     />
-                    <Bar dataKey="custos" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="custos" fill="#ef4444" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
@@ -384,22 +384,22 @@ export default function Index() {
                       name === 'receitas' ? 'Receitas' : name === 'despesas' ? 'Despesas' : 'Lucro'
                     ]}
                     contentStyle={{ 
-                      backgroundColor: 'hsl(var(--card))', 
-                      border: '1px solid hsl(var(--border))',
+                      backgroundColor: '#ffffff', 
+                      border: '1px solid #e0dbd4',
                       borderRadius: '8px'
                     }}
                   />
                   <Legend 
                     formatter={(value) => value === 'receitas' ? 'Receitas' : value === 'despesas' ? 'Despesas' : 'Lucro'}
                   />
-                  <Bar dataKey="receitas" fill="hsl(142 76% 36%)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="despesas" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="receitas" fill="#16a34a" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="despesas" fill="#ef4444" radius={[4, 4, 0, 0]} />
                   <Line 
                     type="monotone" 
                     dataKey="lucro" 
-                    stroke="hsl(var(--primary))" 
+                    stroke="#e07b20" 
                     strokeWidth={2}
-                    dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2, r: 4 }}
+                    dot={{ fill: '#e07b20', strokeWidth: 2, r: 4 }}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
