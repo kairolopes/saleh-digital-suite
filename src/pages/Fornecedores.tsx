@@ -109,6 +109,7 @@ export default function Fornecedores() {
     mutationFn: async (data: typeof formData) => {
       const { error } = await supabase.from('suppliers').insert([{
         name: data.name,
+        cnpj: data.cnpj?.replace(/\D/g, '') || null,
         contact_name: data.contact_name || null,
         phone: data.phone || null,
         email: data.email || null,
@@ -161,7 +162,7 @@ export default function Fornecedores() {
   });
 
   const resetForm = () => {
-    setFormData({ name: '', contact_name: '', phone: '', email: '', address: '', notes: '' });
+    setFormData({ name: '', cnpj: '', contact_name: '', phone: '', email: '', address: '', notes: '' });
     setEditingSupplier(null);
     setIsDialogOpen(false);
   };
@@ -184,6 +185,7 @@ export default function Fornecedores() {
     setEditingSupplier(supplier);
     setFormData({
       name: supplier.name,
+      cnpj: supplier.cnpj ? formatCnpj(supplier.cnpj) : '',
       contact_name: supplier.contact_name || '',
       phone: supplier.phone || '',
       email: supplier.email || '',
