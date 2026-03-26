@@ -11,11 +11,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Pencil, Truck, Search } from 'lucide-react';
+import { Plus, Pencil, Truck, Search, Loader2 } from 'lucide-react';
 import { z } from 'zod';
 
 const supplierSchema = z.object({
   name: z.string().min(2, 'Nome deve ter no mínimo 2 caracteres').max(100),
+  cnpj: z.string().max(18).optional(),
   contact_name: z.string().max(100).optional(),
   phone: z.string().max(20).optional(),
   email: z.string().email('Email inválido').optional().or(z.literal('')),
@@ -26,6 +27,7 @@ const supplierSchema = z.object({
 type Supplier = {
   id: string;
   name: string;
+  cnpj: string | null;
   contact_name: string | null;
   phone: string | null;
   email: string | null;
@@ -34,20 +36,14 @@ type Supplier = {
   is_active: boolean;
 };
 
-export default function Fornecedores() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [formData, setFormData] = useState({
-    name: '',
-    contact_name: '',
-    phone: '',
-    email: '',
-    address: '',
-    notes: '',
-  });
+function formatCnpj(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 14);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
 
   const { data: suppliers, isLoading } = useQuery({
     queryKey: ['suppliers'],
