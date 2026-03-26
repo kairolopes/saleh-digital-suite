@@ -577,44 +577,69 @@ serve(async (req) => {
       });
     }
 
-    console.log(`Message from ${phone}: ${messageText}`);
+    console.log(`Message from ${phone}: ${isImageMessage ? "[IMAGE]" : messageText}`);
     const supabase = getSupabase();
 
-    // 1. Check for pending interactions
-    const { data: pendingList } = await supabase
-      .from("pending_whatsapp_purchases")
-      .select("*")
-      .eq("phone", phone)
-      .gt("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false })
-      .limit(1);
+    // 1. Check for pending interactions (only for text messages)
+    if (messageText && !isImageMessage) {
+      const { data: pendingList } = await supabase
+        .from("pending_whatsapp_purchases")
+        .select("*")
+        .eq("phone", phone)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1);
 
-    if (pendingList?.length) {
-      const pending = pendingList[0];
-      let result;
+      if (pendingList?.length) {
+        const pending = pendingList[0];
+        let result;
 
-      if (pending.status === "awaiting_product_choice") {
-        result = await handleProductChoice(supabase, phone, messageText, pending);
-      } else if (pending.status === "awaiting_confirmation") {
-        result = await handleConfirmation(supabase, phone, messageText, pending);
-      } else if (pending.status === "awaiting_supplier") {
-        result = await handleSupplierSelection(supabase, phone, messageText, pending);
-      }
+        if (pending.status === "awaiting_product_choice") {
+          result = await handleProductChoice(supabase, phone, messageText, pending);
+        } else if (pending.status === "awaiting_confirmation") {
+          result = await handleConfirmation(supabase, phone, messageText, pending);
+        } else if (pending.status === "awaiting_supplier") {
+          result = await handleSupplierSelection(supabase, phone, messageText, pending);
+        }
 
-      if (result) {
-        return new Response(JSON.stringify(result), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        if (result) {
+          return new Response(JSON.stringify(result), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
     }
 
-    // 2. Parse new purchase with AI
-    const parsed = await parseWithAI(messageText);
-    if (!parsed || !parsed.quantidade || parsed.quantidade <= 0 || !parsed.valor_total || parsed.valor_total <= 0) {
-      await sendWhatsApp(phone, "❌ Não consegui identificar todos os dados da compra.\n\nExemplos válidos:\n_10kg arroz 60 reais_\n_comprei feijão 30kg a 2,50 o kg_\n_paguei 150 em 5 fardos de cerveja_\n\nInforme *produto*, *quantidade* e *valor*.");
-      return new Response(JSON.stringify({ ok: true, not_purchase: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // 2. Parse purchase — from IMAGE or TEXT
+    let parsed: { produto: string; quantidade: number; unidade: string; valor_total: number; fornecedor: string | null } | null = null;
+
+    if (isImageMessage) {
+      console.log("Processing image message:", imageUrl);
+      await sendWhatsApp(phone, "📸 *Analisando imagem...* Aguarde um momento.");
+
+      const imageData = await downloadImageAsBase64(imageUrl);
+      if (!imageData) {
+        await sendWhatsApp(phone, "❌ Não consegui baixar a imagem. Tente enviar novamente ou digite os dados manualmente.");
+        return new Response(JSON.stringify({ ok: true, image_download_failed: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      parsed = await parseImageWithAI(imageData.base64, imageData.mimeType, imageCaption || undefined);
+      if (!parsed || !parsed.quantidade || parsed.quantidade <= 0 || !parsed.valor_total || parsed.valor_total <= 0) {
+        await sendWhatsApp(phone, "❌ Não consegui identificar dados de compra na imagem.\n\n📝 Dicas:\n- Envie foto nítida da nota/cupom\n- Certifique-se que produto, quantidade e valor estejam visíveis\n- Ou digite: _10kg arroz 60 reais_");
+        return new Response(JSON.stringify({ ok: true, image_not_parsed: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      parsed = await parseWithAI(messageText);
+      if (!parsed || !parsed.quantidade || parsed.quantidade <= 0 || !parsed.valor_total || parsed.valor_total <= 0) {
+        await sendWhatsApp(phone, "❌ Não consegui identificar todos os dados da compra.\n\nExemplos válidos:\n_10kg arroz 60 reais_\n_comprei feijão 30kg a 2,50 o kg_\n_paguei 150 em 5 fardos de cerveja_\n\n📸 Você também pode *enviar uma foto* da nota fiscal!");
+        return new Response(JSON.stringify({ ok: true, not_purchase: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     console.log("Parsed:", JSON.stringify(parsed));
