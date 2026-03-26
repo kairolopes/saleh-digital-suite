@@ -689,7 +689,7 @@ serve(async (req) => {
         // Supplier mentioned but NOT matched → ask supplier BEFORE confirmation
         await supabase.from("pending_whatsapp_purchases").insert({
           phone, product_id: product.id, quantity: parsed.quantidade,
-          total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+          total_price: parsed.valor_total, unit: parsed.unidade, message_original: originalMessage,
           status: "awaiting_supplier", supplier_id: null,
         });
 
@@ -710,7 +710,7 @@ serve(async (req) => {
         // Fornecedor obrigatório — perguntar antes de confirmar
         await supabase.from("pending_whatsapp_purchases").insert({
           phone, product_id: product.id, quantity: parsed.quantidade,
-          total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+          total_price: parsed.valor_total, unit: parsed.unidade, message_original: originalMessage,
           status: "awaiting_supplier", supplier_id: null,
         });
 
@@ -731,7 +731,7 @@ serve(async (req) => {
       // Supplier resolved → go to confirmation with all data
       await supabase.from("pending_whatsapp_purchases").insert({
         phone, product_id: product.id, quantity: parsed.quantidade,
-        total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+        total_price: parsed.valor_total, unit: parsed.unidade, message_original: originalMessage,
         status: "awaiting_confirmation", supplier_id: matchedSupplierId,
       });
 
@@ -767,7 +767,7 @@ serve(async (req) => {
 
       await supabase.from("pending_whatsapp_purchases").insert({
         phone, product_id: options[0].id, quantity: parsed.quantidade,
-        total_price: parsed.valor_total, unit: parsed.unidade, message_original: messageText,
+        total_price: parsed.valor_total, unit: parsed.unidade, message_original: originalMessage,
         status: "awaiting_product_choice",
         product_options: options.map(o => ({ id: o.id, name: o.name })),
         supplier_id: ambiguousSupplierId,
