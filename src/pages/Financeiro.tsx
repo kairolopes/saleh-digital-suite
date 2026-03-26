@@ -710,15 +710,15 @@ export default function Financeiro() {
                           name === 'entradas' ? 'Entradas' : name === 'saidas' ? 'Saídas' : 'Saldo'
                         ]}
                         contentStyle={{ 
-                          backgroundColor: 'hsl(var(--card))', 
-                          border: '1px solid hsl(var(--border))',
+                          backgroundColor: '#ffffff', 
+                          border: '1px solid #e0dbd4',
                           borderRadius: '8px'
                         }}
                       />
                       <Legend />
-                      <Area type="monotone" dataKey="entradas" stackId="1" stroke="hsl(var(--success))" fill="hsl(var(--success) / 0.3)" name="Entradas" />
-                      <Area type="monotone" dataKey="saidas" stackId="2" stroke="hsl(var(--destructive))" fill="hsl(var(--destructive) / 0.3)" name="Saídas" />
-                      <Area type="monotone" dataKey="saldo" stroke="hsl(var(--primary))" fill="hsl(var(--primary) / 0.1)" name="Saldo Acumulado" />
+                      <Area type="monotone" dataKey="entradas" stackId="1" stroke="#22c55e" fill="rgba(34, 197, 94, 0.3)" name="Entradas" />
+                      <Area type="monotone" dataKey="saidas" stackId="2" stroke="#ef4444" fill="rgba(239, 68, 68, 0.3)" name="Saídas" />
+                      <Area type="monotone" dataKey="saldo" stroke="#e07b20" fill="rgba(224, 123, 32, 0.1)" name="Saldo Acumulado" />
                     </AreaChart>
                   </ResponsiveContainer>
                 ) : (
