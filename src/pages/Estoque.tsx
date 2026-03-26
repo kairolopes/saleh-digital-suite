@@ -813,7 +813,7 @@ export default function Estoque() {
                     {categories.map(cat => {
                       const count = getCategoryProductCount(cat.id);
                       return (
-                        <Card key={cat.id} className="border shadow-sm">
+                        <Card key={cat.id} className="border shadow-sm cursor-pointer hover:border-primary/50 transition-colors" onClick={() => { setSelectedCategoryFilter(cat.id); setActiveTab('produtos'); setCurrentPage(1); }}>
                           <CardContent className="p-4 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="w-4 h-4 rounded-full" style={{ backgroundColor: cat.color }} />
