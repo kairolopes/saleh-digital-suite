@@ -1,0 +1,1 @@
+DELETE FROM recipe_items WHERE subrecipe_id = recipe_id;

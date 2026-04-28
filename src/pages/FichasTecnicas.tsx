@@ -158,8 +158,13 @@ export default function FichasTecnicas() {
     },
   });
 
-  // Calculate recipe cost
-  const calculateRecipeCost = (recipeId: string): number => {
+  // Calculate recipe cost (with cycle protection)
+  const calculateRecipeCost = (recipeId: string, visited: Set<string> = new Set()): number => {
+    if (visited.has(recipeId)) {
+      console.warn("Ciclo detectado em ficha técnica:", recipeId);
+      return 0;
+    }
+    visited.add(recipeId);
     const items = allRecipeItems?.filter((i) => i.recipe_id === recipeId) || [];
     let totalCost = 0;
 
@@ -169,8 +174,8 @@ export default function FichasTecnicas() {
         if (product) {
           totalCost += Number(item.quantity) * Number(product.average_price);
         }
-      } else if (item.subrecipe_id) {
-        const subCost = calculateRecipeCost(item.subrecipe_id);
+      } else if (item.subrecipe_id && item.subrecipe_id !== recipeId) {
+        const subCost = calculateRecipeCost(item.subrecipe_id, new Set(visited));
         const subRecipe = recipes?.find((r) => r.id === item.subrecipe_id);
         if (subRecipe && subRecipe.yield_quantity > 0) {
           totalCost += (subCost / subRecipe.yield_quantity) * Number(item.quantity);
