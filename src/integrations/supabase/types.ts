@@ -982,6 +982,7 @@ export type Database = {
       suppliers: {
         Row: {
           address: string | null
+          cnpj: string | null
           contact_name: string | null
           created_at: string | null
           email: string | null
@@ -994,6 +995,7 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          cnpj?: string | null
           contact_name?: string | null
           created_at?: string | null
           email?: string | null
@@ -1006,6 +1008,7 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          cnpj?: string | null
           contact_name?: string | null
           created_at?: string | null
           email?: string | null
