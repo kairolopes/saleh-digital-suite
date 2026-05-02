@@ -59,8 +59,9 @@ interface RecipeFormData {
   name: string;
   description: string;
   preparation_time: number;
-  yield_quantity: number;
-  profit_percent: number;
+  yield_quantity: string;
+  yield_unit: string;
+  profit_percent: string;
   image_url: string | null;
   ingredients: {
     product_id: string | null;
@@ -72,8 +73,14 @@ interface RecipeFormData {
 
 // Helper to parse decimal input (accepts both . and ,)
 const parseDecimal = (value: string): number => {
-  const normalized = value.replace(",", ".");
+  const normalized = String(value).replace(",", ".");
   return parseFloat(normalized) || 0;
+};
+
+// Format number for display in decimal inputs (use comma)
+const formatDecimal = (value: number): string => {
+  if (value === 0 || value == null) return "";
+  return String(value).replace(".", ",");
 };
 
 export default function FichasTecnicas() {
