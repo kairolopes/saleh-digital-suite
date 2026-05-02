@@ -1,53 +1,35 @@
-## Diagnóstico
+## Problema
 
-Olhando o print, o campo "Rendimento (porções)" está com valor **558**, não 5,58. Foi por isso que o cálculo deu certinho R$ 0,29:
+No formulário de adicionar ingrediente da ficha técnica, o campo **Unid.** (linhas 1289–1297 de `src/pages/FichasTecnicas.tsx`) é um `<Input>` de texto livre. Isso permite digitar qualquer coisa (ex: "kg", "Kg", "kgs", "quilo"), gerando inconsistência nas unidades salvas em `recipe_ingredients.unit`.
 
-- Custo total: **R$ 81,40**
-- 81,40 ÷ **558** = R$ 0,1458 por porção (≈ R$ 0,15)
-- Com 100% de lucro = **R$ 0,29**
+Você quer que vire um **select** com opções fixas, igual ao seletor já usado para `yield_unit` no rendimento.
 
-### Por que digitou 5,58 e virou 558?
+## Plano
 
-O campo `yield_quantity` é um `<input type="text">` controlado, vinculado a um número (`formData.yield_quantity`). Hoje funciona assim:
+Trocar o `<Input>` do campo **Unid.** por um `<Select>` com opções fixas:
 
-1. Você digita `5`, vira `5`.
-2. Você digita `,` → `parseDecimal("5,")` → `parseFloat("5.")` → `5` (vírgula descartada porque ainda não tem dígito depois).
-3. Você digita `5` → o valor exibido é `5` (número), então fica `55` no input → `parseDecimal("55")` = `55`.
-4. Você digita `8` → `558`.
+- `kg` (quilograma)
+- `g` (grama)
+- `L` (litro)
+- `mL` (mililitro)
+- `unidade`
+- `porção`
 
-A vírgula nunca "sobrevive" no estado porque ele é numérico. Em quantidade de ingredientes isso não acontece pois o estado é string.
+### Comportamento
 
-Além disso, conceitualmente o campo está rotulado como "porções", mas para subprodutos (SP) o rendimento é em **kg/L/unidade**, não em porções. Para o "Peixe ao molho" você quer dizer "rende 5,58 kg", não "5,58 porções".
+1. Quando o usuário seleciona um insumo do estoque, a unidade já é preenchida automaticamente a partir de `product.unit` (linha 1241). Se a unidade do produto não bater exatamente com uma das opções do select (ex: produto cadastrado como "Kg"), normalizar para minúsculo na hora de exibir, mas manter a opção mais próxima selecionada. Se mesmo assim não bater nenhuma, manter como `kg` por padrão e logar um aviso.
+2. Quando o usuário seleciona um subproduto, já vem `sp.yield_unit || "porção"` (linha 1248) — isso continua funcionando porque o seletor de rendimento do subproduto já usa as mesmas opções.
+3. Para o usuário, o select fica visível e clicável mesmo após auto-preencher, permitindo trocar a unidade manualmente se quiser.
 
-## Plano de correção
+### Arquivo afetado
 
-### 1. Permitir digitar vírgula no rendimento
+- `src/pages/FichasTecnicas.tsx` — substituir o bloco `<div className="w-20">` (linhas 1288–1297) por um `<Select>` usando `currentIngredient.unit` como `value` e `setCurrentIngredient(...)` no `onValueChange`.
 
-Trocar o estado de `yield_quantity` no formulário para guardar **string** enquanto o usuário digita, e só converter para número na hora de calcular/salvar. Aplicar o mesmo para "Lucro (%)" para evitar o mesmo bug com decimais.
+### Fora de escopo
 
-Mudanças em `src/pages/FichasTecnicas.tsx`:
-- `formData.yield_quantity`: passa a ser `string` no estado do form (ex: `"5,58"`).
-- `formData.profit_percent`: idem.
-- No `onChange`, salvar `e.target.value` cru (sem `parseDecimal`).
-- Nos cálculos (`getFormTotalCost / yield`, salvar mutation, etc.), aplicar `parseDecimal(formData.yield_quantity) || 1` na hora do uso.
-- No reset/edit, converter número → string com vírgula (`String(value).replace(".", ",")`).
-
-### 2. Rótulo correto conforme tipo de receita
-
-No formulário, o label hoje é fixo "Rendimento (porções)". Ajustar para:
-- Prato final: `Rendimento (porções)`
-- Subproduto: `Rendimento (${yield_unit})` — ex: `Rendimento (kg)`
-
-E exibir o campo `yield_unit` (já existe na tabela `recipes`) como um select ao lado quando for subproduto, com opções `kg`, `L`, `unidade`, `porção`.
-
-### 3. Rótulo dos resultados
-
-Onde aparece "Custo por Porção" e "Preço de Venda por Porção", trocar dinamicamente para "Custo por kg" / "Preço de Venda por kg" (ou unidade escolhida) quando for subproduto. Isso evita confusão futura.
-
-### 4. Correção do dado atual no banco
-
-A ficha "Peixe ao molho" está com `yield_quantity = 558`. Após o ajuste do form, abrir a ficha e digitar `5,58` no rendimento e salvar — ou eu rodo um UPDATE direto via migration para corrigir agora.
+- Não vou alterar dados existentes em `recipe_ingredients` (unidades já salvas como texto livre permanecem como estão; só novas inserções/edições passam pelo select).
+- Os campos `unit` em outras telas (estoque, compras) não são alterados.
 
 ## Pergunta
 
-Quer que eu já corrija o valor atual do "Peixe ao molho" para `5,58` junto com o ajuste do código, ou prefere reabrir a ficha e salvar manualmente depois?
+A lista de unidades acima (`kg`, `g`, `L`, `mL`, `unidade`, `porção`) cobre tudo que você usa, ou quer adicionar/remover alguma (ex: `dúzia`, `colher`, `xícara`)?

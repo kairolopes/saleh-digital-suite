@@ -1285,15 +1285,26 @@ export default function FichasTecnicas() {
                         placeholder="0,05"
                       />
                     </div>
-                    <div className="w-20">
+                    <div className="w-24">
                       <Label className="text-xs text-muted-foreground">Unid.</Label>
-                      <Input
-                        value={currentIngredient.unit}
-                        onChange={(e) =>
-                          setCurrentIngredient({ ...currentIngredient, unit: e.target.value })
+                      <Select
+                        value={currentIngredient.unit || "kg"}
+                        onValueChange={(value) =>
+                          setCurrentIngredient({ ...currentIngredient, unit: value })
                         }
-                        placeholder="kg"
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Unid." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="kg">kg</SelectItem>
+                          <SelectItem value="g">g</SelectItem>
+                          <SelectItem value="L">L</SelectItem>
+                          <SelectItem value="mL">mL</SelectItem>
+                          <SelectItem value="unidade">unidade</SelectItem>
+                          <SelectItem value="porção">porção</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="w-24">
                       <Label className="text-xs text-muted-foreground">Custo Est.</Label>
