@@ -1,18 +1,14 @@
-## Excluir ficha técnica "Abacaxi aguado"
+## Excluir definitivamente "Abacaxi aguado"
 
-A ficha `Abacaxi aguado` (id `dec8944f-ef92-42e0-b2a8-db8bd6f16f8b`) está vazia (0 ingredientes) e não é usada como subproduto, mas tem 1 vínculo no cardápio (`menu_items`).
+Forçar exclusão completa, removendo também os 2 itens de pedidos históricos que referenciam essa ficha.
 
 ### Passos
 
-1. **Verificar pedidos** vinculados ao `menu_item` dessa receita (`order_items`).
+1. `DELETE FROM order_items` onde `menu_item_id` = item de menu vinculado à receita `dec8944f-ef92-42e0-b2a8-db8bd6f16f8b` (2 registros).
+2. `DELETE FROM menu_items WHERE recipe_id = 'dec8944f-ef92-42e0-b2a8-db8bd6f16f8b'`.
+3. `DELETE FROM recipe_items WHERE recipe_id = 'dec8944f-ef92-42e0-b2a8-db8bd6f16f8b'` (caso haja resíduo).
+4. `DELETE FROM recipes WHERE id = 'dec8944f-ef92-42e0-b2a8-db8bd6f16f8b'`.
+5. `SELECT` final confirmando que sumiu de `recipes`, `menu_items` e `order_items`.
 
-2. **Decidir a ação conforme a regra do projeto** ("Deactivate, NEVER delete recipes/items linked to orders"):
-   - **Sem pedidos** → deletar `menu_items` correspondente e depois `recipes` (id `dec8944f...`).
-   - **Com pedidos** → desativar: `menu_items.is_available = false` + `recipes.is_available = false`. Avisar você que não foi possível excluir fisicamente.
-
-3. **Confirmar** com `SELECT` final que a ficha não aparece mais (ou está desativada).
-
-### Não será alterado
-- `SP Abacaxi Assado` (subproduto ativo com 2 ingredientes, ligado ao cardápio).
-- Duplicata vazia `SP Abacaxi Assado` (id `abe98e63...`) — não pediu pra mexer.
-- Nenhum produto do estoque, pedido ou lançamento financeiro.
+### Observação
+Os 2 pedidos históricos vão perder esse item da composição (totais antigos não serão recalculados — ficam como estavam). Nenhuma outra ficha, produto, estoque ou lançamento financeiro é afetado.
