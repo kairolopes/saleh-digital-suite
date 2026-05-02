@@ -93,8 +93,9 @@ export default function FichasTecnicas() {
     name: "",
     description: "",
     preparation_time: 0,
-    yield_quantity: 1,
-    profit_percent: 0,
+    yield_quantity: "1",
+    yield_unit: "porções",
+    profit_percent: "0",
     image_url: null,
     ingredients: [],
   });
