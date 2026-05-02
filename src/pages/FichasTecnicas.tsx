@@ -1359,22 +1359,30 @@ export default function FichasTecnicas() {
                 )}
 
                 {/* Calculated values */}
-                {formData.ingredients.length > 0 && (
-                  <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Custo por Porção:</span>
-                      <span>R$ {(getFormTotalCost() / formData.yield_quantity).toFixed(2)}</span>
+                {formData.ingredients.length > 0 && (() => {
+                  const yieldQty = parseDecimal(formData.yield_quantity) || 1;
+                  const profitPct = parseDecimal(formData.profit_percent);
+                  const unitLabel = formData.is_subproduct
+                    ? formData.yield_unit || "kg"
+                    : "Porção";
+                  const costPerUnit = getFormTotalCost() / yieldQty;
+                  return (
+                    <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Custo por {unitLabel}:</span>
+                        <span>R$ {costPerUnit.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Lucro ({profitPct}%):</span>
+                        <span>R$ {(costPerUnit * (profitPct / 100)).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-primary">
+                        <span>Preço de Venda por {unitLabel}:</span>
+                        <span>R$ {getFormSellPrice().toFixed(2)}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Lucro ({formData.profit_percent}%):</span>
-                      <span>R$ {((getFormTotalCost() / formData.yield_quantity) * (formData.profit_percent / 100)).toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold text-primary">
-                      <span>Preço de Venda por Porção:</span>
-                      <span>R$ {getFormSellPrice().toFixed(2)}</span>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               {/* Actions */}
