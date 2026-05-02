@@ -233,8 +233,8 @@ export default function FichasTecnicas() {
           preparation_time: data.preparation_time || null,
           image_url: data.image_url,
           recipe_type: data.is_subproduct ? "subproduto" : "prato_final",
-          yield_quantity: data.yield_quantity,
-          yield_unit: "porções",
+          yield_quantity: parseDecimal(data.yield_quantity) || 1,
+          yield_unit: data.yield_unit || "porções",
         })
         .select()
         .single();
@@ -268,8 +268,10 @@ export default function FichasTecnicas() {
         }
         return sum;
       }, 0);
-      const costPerPortion = totalCost / data.yield_quantity;
-      const sellPrice = costPerPortion * (1 + data.profit_percent / 100);
+      const yieldQty = parseDecimal(data.yield_quantity) || 1;
+      const profitPct = parseDecimal(data.profit_percent);
+      const costPerPortion = totalCost / yieldQty;
+      const sellPrice = costPerPortion * (1 + profitPct / 100);
       
       // Helper function to calculate subrecipe cost
       function calculateRecipeCostTemp(recipeId: string): number {
@@ -319,7 +321,8 @@ export default function FichasTecnicas() {
           preparation_time: data.preparation_time || null,
           image_url: data.image_url,
           recipe_type: data.is_subproduct ? "subproduto" : "prato_final",
-          yield_quantity: data.yield_quantity,
+          yield_quantity: parseDecimal(data.yield_quantity) || 1,
+          yield_unit: data.yield_unit || "porções",
         })
         .eq("id", id);
 
@@ -354,8 +357,10 @@ export default function FichasTecnicas() {
         }
         return sum;
       }, 0);
-      const costPerPortion = totalCost / data.yield_quantity;
-      const sellPrice = costPerPortion * (1 + data.profit_percent / 100);
+      const yieldQty = parseDecimal(data.yield_quantity) || 1;
+      const profitPct = parseDecimal(data.profit_percent);
+      const costPerPortion = totalCost / yieldQty;
+      const sellPrice = costPerPortion * (1 + profitPct / 100);
 
       const existingMenuItem = menuItems?.find((m) => m.recipe_id === id);
       if (existingMenuItem) {
@@ -463,8 +468,9 @@ export default function FichasTecnicas() {
       name: "",
       description: "",
       preparation_time: 0,
-      yield_quantity: 1,
-      profit_percent: 0,
+      yield_quantity: "1",
+      yield_unit: "porções",
+      profit_percent: "0",
       image_url: null,
       ingredients: [],
     });
@@ -509,8 +515,9 @@ export default function FichasTecnicas() {
       name: recipe.name.replace(/^SP\s*/i, ""),
       description: recipe.description || "",
       preparation_time: recipe.preparation_time || 0,
-      yield_quantity: recipe.yield_quantity,
-      profit_percent: Math.round(profitPercent * 100) / 100,
+      yield_quantity: formatDecimal(Number(recipe.yield_quantity)) || "1",
+      yield_unit: recipe.yield_unit || "porções",
+      profit_percent: formatDecimal(Math.round(profitPercent * 100) / 100),
       image_url: recipe.image_url,
       ingredients,
     });
@@ -609,8 +616,10 @@ export default function FichasTecnicas() {
 
   // Calculate sell price: cost + profit%
   const getFormSellPrice = (): number => {
-    const costPerPortion = getFormTotalCost() / formData.yield_quantity;
-    return costPerPortion * (1 + formData.profit_percent / 100);
+    const yieldQty = parseDecimal(formData.yield_quantity) || 1;
+    const profitPct = parseDecimal(formData.profit_percent);
+    const costPerPortion = getFormTotalCost() / yieldQty;
+    return costPerPortion * (1 + profitPct / 100);
   };
 
   // Separate recipes by type
@@ -1115,16 +1124,37 @@ export default function FichasTecnicas() {
               {/* Yield, Prep Time and Profit */}
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="yield">Rendimento (porções)</Label>
-                  <Input
-                    id="yield"
-                    type="text"
-                    inputMode="decimal"
-                    value={formData.yield_quantity}
-                    onChange={(e) =>
-                      setFormData({ ...formData, yield_quantity: parseDecimal(e.target.value) || 1 })
-                    }
-                  />
+                  <Label htmlFor="yield">
+                    {formData.is_subproduct
+                      ? `Rendimento (${formData.yield_unit || "kg"})`
+                      : "Rendimento (porções)"}
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="yield"
+                      type="text"
+                      inputMode="decimal"
+                      value={formData.yield_quantity}
+                      onChange={(e) =>
+                        setFormData({ ...formData, yield_quantity: e.target.value })
+                      }
+                      placeholder="Ex: 5,58"
+                    />
+                    {formData.is_subproduct && (
+                      <select
+                        className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                        value={formData.yield_unit}
+                        onChange={(e) =>
+                          setFormData({ ...formData, yield_unit: e.target.value })
+                        }
+                      >
+                        <option value="kg">kg</option>
+                        <option value="L">L</option>
+                        <option value="unidade">un</option>
+                        <option value="porções">porções</option>
+                      </select>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="prep_time">Tempo de Preparo (min)</Label>
@@ -1151,7 +1181,7 @@ export default function FichasTecnicas() {
                     inputMode="decimal"
                     value={formData.profit_percent}
                     onChange={(e) =>
-                      setFormData({ ...formData, profit_percent: parseDecimal(e.target.value) })
+                      setFormData({ ...formData, profit_percent: e.target.value })
                     }
                     placeholder="Ex: 10"
                   />
