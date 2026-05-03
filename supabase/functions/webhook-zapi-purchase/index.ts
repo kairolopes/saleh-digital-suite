@@ -7,48 +7,34 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const STOPWORDS = new Set(["e", "de", "da", "do", "das", "dos", "com", "em", "no", "na", "um", "uma", "o", "a", "os", "as", "por"]);
+const STOPWORDS = new Set(["e", "de", "da", "do", "das", "dos", "com", "em", "no", "na", "um", "uma", "o", "a", "os", "as", "por", "ltda", "me", "epp", "sa"]);
 
 function normalize(text: string): string {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
-
 function tokenize(text: string): string[] {
-  return normalize(text)
-    .split(/\s+/)
-    .filter(w => w.length >= 2 && !STOPWORDS.has(w));
+  return normalize(text).split(/[\s\.\-_,]+/).filter(w => w.length >= 2 && !STOPWORDS.has(w));
 }
-
-/** Score how well `query` matches `candidate` product name. Returns 0-1. */
 function scoreProduct(query: string, candidateName: string): number {
   const nq = normalize(query);
   const nc = normalize(candidateName);
-
-  // Tier 1: exact match
   if (nq === nc) return 1.0;
-
-  // Tier 2: candidate starts with query or query starts with candidate
   if (nc.startsWith(nq)) return 0.9;
   if (nq.startsWith(nc)) return 0.85;
-
-  // Tier 3: candidate contains query as substring
   if (nc.includes(nq)) return 0.8;
-
-  // Tier 4: token overlap (only meaningful tokens)
   const queryTokens = tokenize(query);
   const candidateTokens = tokenize(candidateName);
   if (queryTokens.length === 0) return 0;
-
-  let matchedTokens = 0;
+  let matched = 0;
   for (const qt of queryTokens) {
-    if (candidateTokens.some(ct => ct === qt || ct.startsWith(qt) || qt.startsWith(ct))) {
-      matchedTokens++;
-    }
+    if (candidateTokens.some(ct => ct === qt || ct.startsWith(qt) || qt.startsWith(ct))) matched++;
   }
-
-  const coverage = matchedTokens / queryTokens.length;
-  // Scale token overlap to 0.3-0.7 range
-  return coverage * 0.7;
+  return (matched / queryTokens.length) * 0.7;
+}
+function normalizeCnpj(c?: string | null): string | null {
+  if (!c) return null;
+  const d = c.replace(/\D/g, "");
+  return d.length === 14 ? d : null;
 }
 
 async function sendWhatsApp(phone: string, message: string) {
@@ -61,134 +47,131 @@ async function sendWhatsApp(phone: string, message: string) {
     headers: { "Content-Type": "application/json", "Client-Token": clientToken },
     body: JSON.stringify({ phone, message }),
   });
-  console.log("Z-API send-text response:", resp.status, await resp.text());
+  console.log("Z-API send-text:", resp.status, await resp.text());
 }
 
-async function downloadImageAsBase64(imageUrl: string): Promise<{ base64: string; mimeType: string } | null> {
+async function downloadAsBase64(url: string): Promise<{ base64: string; mimeType: string } | null> {
   try {
-    const resp = await fetch(imageUrl);
-    if (!resp.ok) {
-      console.error("Failed to download image:", resp.status);
-      return null;
-    }
-    const contentType = resp.headers.get("content-type") || "image/jpeg";
+    const resp = await fetch(url);
+    if (!resp.ok) { console.error("download failed", resp.status); return null; }
+    const contentType = (resp.headers.get("content-type") || "application/octet-stream").split(";")[0].trim();
     const buffer = await resp.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
     }
-    const base64 = btoa(binary);
-    return { base64, mimeType: contentType.split(";")[0] };
-  } catch (err) {
-    console.error("Image download error:", err);
-    return null;
-  }
+    return { base64: btoa(binary), mimeType: contentType };
+  } catch (e) { console.error("download error", e); return null; }
 }
 
-async function parseImageWithAI(imageBase64: string, mimeType: string, caption?: string): Promise<{
-  produto: string; quantidade: number; unidade: string; valor_total: number; fornecedor: string | null;
-} | null> {
+type ParsedItem = { produto: string; quantidade: number; unidade: string; valor_total: number };
+type ParsedBatch = {
+  itens: ParsedItem[];
+  fornecedor_nome: string | null;
+  fornecedor_cnpj: string | null;
+};
+
+async function parseMediaWithAI(base64: string, mimeType: string, caption?: string): Promise<ParsedBatch | null> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
-  if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
+  if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
 
-  const userContent: any[] = [
-    {
-      type: "image_url",
-      image_url: { url: `data:${mimeType};base64,${imageBase64}` },
-    },
-    {
-      type: "text",
-      text: caption
-        ? `Analise esta imagem de compra/nota fiscal. O usuário também disse: "${caption}". Extraia os dados de compra.`
-        : "Analise esta imagem de compra/nota fiscal/recibo. Extraia os dados de compra visíveis.",
-    },
-  ];
+  const isPdf = mimeType === "application/pdf";
+  const userContent: any[] = [];
+  // Both images and PDFs are passed via image_url data-URI on the gateway (multimodal)
+  userContent.push({
+    type: "image_url",
+    image_url: { url: `data:${mimeType};base64,${base64}` },
+  });
+  userContent.push({
+    type: "text",
+    text: caption
+      ? `Analise este ${isPdf ? "PDF" : "documento/imagem"} de compra/nota fiscal. Comentário do usuário: "${caption}". Extraia TODOS os itens.`
+      : `Analise este ${isPdf ? "PDF" : "documento/imagem"} de compra/nota fiscal/cupom. Extraia TODOS os itens visíveis.`,
+  });
 
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
+      model: "google/gemini-2.5-pro",
       messages: [
         {
           role: "system",
-          content: `Voce e um assistente que extrai dados de compras de insumos de restaurante a partir de FOTOS de notas fiscais, cupons, recibos ou comprovantes.
-
-OBJETIVO: Extrair produto(s), quantidade, unidade e valor da imagem.
-
+          content: `Voce extrai TODOS os itens de uma nota fiscal, cupom, recibo ou foto de compra de insumos.
 REGRAS:
-- Se a imagem contiver MULTIPLOS itens, extraia o item PRINCIPAL ou de MAIOR valor.
-- Se houver dados claros de fornecedor (nome da loja/empresa), extraia tambem.
-- Interprete abreviacoes: cx = caixa, fd = fardo, pct = pacote, un = unidade, kg, L, g, ml, dz = duzia, sc = saco
-- Use virgula como separador decimal brasileiro: "2,50" = 2.50
-- Se a imagem nao for de uma compra/nota, NAO chame a funcao.
-- Se os dados estiverem ilegíveis ou incompletos, NAO chame a funcao.
-
-IMPORTANTE: So chame a funcao se conseguir identificar produto, quantidade E valor na imagem.`,
+- Extraia CADA item separadamente, com nome, quantidade, unidade e valor total da linha.
+- Use ponto como separador decimal interno (mas aceite "2,50" da nota como 2.50).
+- Unidades validas: kg, g, L, mL, un, cx, fd, pct, dz, sc, gl, bd, lta, gf
+- Se a unidade nao for clara, use "un".
+- Identifique o EMITENTE da nota (razao social) e o CNPJ se visivel. Ignore destinatario/cliente.
+- Ignore subtotais, totais gerais, descontos, taxas, frete - so produtos.
+- Se a midia nao for nota/compra, NAO chame a funcao.`,
         },
         { role: "user", content: userContent },
       ],
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "register_purchase",
-            description: "Registra dados de uma compra extraidos da imagem. So chame se produto, quantidade e valor estiverem TODOS visiveis.",
-            parameters: {
-              type: "object",
-              properties: {
-                produto: { type: "string", description: "Nome do produto/insumo principal" },
-                quantidade: { type: "number", description: "Quantidade comprada" },
-                unidade: { type: "string", description: "Unidade: kg, un, L, g, ml, cx, fd, pct, dz, sc, gl, bd, lta, gf" },
-                valor_total: { type: "number", description: "Valor TOTAL pago em reais" },
-                valor_unitario: { type: "number", description: "Valor por unidade se visivel" },
-                fornecedor: { type: ["string", "null"], description: "Nome do fornecedor/loja se visivel na nota" },
-                descricao_imagem: { type: "string", description: "Breve descricao do que foi visto na imagem para feedback ao usuario" },
+      tools: [{
+        type: "function",
+        function: {
+          name: "register_purchase_batch",
+          description: "Registra todos os itens de uma nota fiscal/compra.",
+          parameters: {
+            type: "object",
+            properties: {
+              fornecedor_nome: { type: ["string", "null"], description: "Razao social do emitente" },
+              fornecedor_cnpj: { type: ["string", "null"], description: "CNPJ do emitente, so digitos ou formatado" },
+              itens: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    produto: { type: "string" },
+                    quantidade: { type: "number" },
+                    unidade: { type: "string" },
+                    valor_total: { type: "number", description: "Valor total da linha em reais" },
+                  },
+                  required: ["produto", "quantidade", "unidade", "valor_total"],
+                  additionalProperties: false,
+                },
               },
-              required: ["produto", "quantidade", "unidade", "descricao_imagem"],
-              additionalProperties: false,
             },
+            required: ["itens"],
+            additionalProperties: false,
           },
         },
-      ],
-      tool_choice: "auto",
+      }],
+      tool_choice: { type: "function", function: { name: "register_purchase_batch" } },
     }),
   });
 
-  if (!response.ok) {
-    console.error("AI vision error:", response.status, await response.text());
-    return null;
-  }
-
-  const data = await response.json();
-  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!toolCall) return null;
-
+  if (!resp.ok) { console.error("AI media error", resp.status, await resp.text()); return null; }
+  const data = await resp.json();
+  const tc = data.choices?.[0]?.message?.tool_calls?.[0];
+  if (!tc) return null;
   try {
-    const raw = JSON.parse(toolCall.function.arguments) as {
-      produto: string; quantidade: number; unidade: string;
-      valor_total?: number; valor_unitario?: number; fornecedor?: string | null;
-      descricao_imagem?: string;
+    const raw = JSON.parse(tc.function.arguments);
+    const itens: ParsedItem[] = (raw.itens || [])
+      .filter((i: any) => i.produto && i.quantidade > 0 && i.valor_total > 0)
+      .map((i: any) => ({
+        produto: String(i.produto).trim(),
+        quantidade: Number(i.quantidade),
+        unidade: String(i.unidade || "un"),
+        valor_total: Number(i.valor_total),
+      }));
+    if (itens.length === 0) return null;
+    return {
+      itens,
+      fornecedor_nome: raw.fornecedor_nome ?? null,
+      fornecedor_cnpj: normalizeCnpj(raw.fornecedor_cnpj),
     };
-    if (!raw.valor_total && raw.valor_unitario && raw.quantidade) {
-      raw.valor_total = raw.valor_unitario * raw.quantidade;
-    }
-    if (!raw.valor_total || raw.valor_total <= 0) return null;
-    return { ...raw, valor_total: raw.valor_total, fornecedor: raw.fornecedor ?? null } as {
-      produto: string; quantidade: number; unidade: string; valor_total: number; fornecedor: string | null;
-    };
-  } catch {
-    console.error("Failed to parse AI vision response:", toolCall.function.arguments);
-    return null;
-  }
+  } catch (e) { console.error("parse media tool failed", e); return null; }
 }
 
-async function parseWithAI(messageText: string) {
+async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
-  if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
-
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
+  const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -196,593 +179,563 @@ async function parseWithAI(messageText: string) {
       messages: [
         {
           role: "system",
-          content: `Voce e um assistente que extrai dados de compras de insumos de restaurante a partir de mensagens em portugues natural.
-
-OBJETIVO: Extrair produto, quantidade, unidade e valor (total ou unitario) da mensagem. O fornecedor e opcional.
-
-REGRAS DE INTERPRETACAO:
-- Aceite QUALQUER ordem na frase: "10kg arroz 60 reais", "paguei 150 em 5kg de feijao", "arroz, 10kg, R$60"
-- Entenda abreviacoes comuns: cx/cxs = caixa(s), fd/fds = fardo(s), pct/pcts = pacote(s), un/und = unidade(s), lt/lts = litro(s), dz = duzia, sc = saco, gl = galao, bd = balde, lta = lata, gf = garrafa
-- Entenda precos unitarios: "a 2,50 o kg", "2,50/kg", "cada um 5 reais" → preencha valor_unitario (NAO valor_total)
-- Entenda precos totais: "60 reais", "R$60", "por 60", "total 60" → preencha valor_total
-- Se ambos forem claros, preencha os dois
-- Use virgula como separador decimal brasileiro: "2,50" = 2.50
-- Interprete contexto: "comprei", "paguei", "gastei", "levei" indicam compra
-- Unidade padrao: se nao especificada mas o contexto indicar (ex: "3 caixas"), use a unidade implicita
-
-REGRA CRITICA: So chame a funcao se a mensagem contiver os TRES dados minimos: produto, quantidade E algum valor (total ou unitario). Se faltar qualquer um, NAO chame.
-Exemplos que NAO devem chamar: "arroz", "10kg arroz", "arroz 60 reais" (sem quantidade clara separada do valor).
-Exemplos VALIDOS: "10kg arroz 60 reais", "comprei feijao 30kg a 2,50 o kg", "paguei 150 em 5 fardos de cerveja", "oleo de soja 3cx 89,90".`,
+          content: `Voce extrai compras de insumos a partir de mensagens em portugues. Pode haver UM OU MAIS itens.
+- Aceite qualquer ordem. Virgula = decimal.
+- Abreviacoes: cx caixa, fd fardo, pct pacote, un unidade, lt litro, dz duzia, sc saco, gl galao, bd balde, lta lata, gf garrafa.
+- Se vier preco unitario ("a 2,50 o kg"), multiplique pela quantidade para obter valor_total.
+- Fornecedor opcional, mencionado por "no/na/do/comprei do".
+- So extraia se TODOS os itens tiverem produto + quantidade + valor.`,
         },
         { role: "user", content: messageText },
       ],
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "register_purchase",
-            description: "Registra dados de uma compra extraidos da mensagem. So chame se produto, quantidade e valor (total ou unitario) estiverem TODOS presentes.",
-            parameters: {
-              type: "object",
-              properties: {
-                produto: { type: "string", description: "Nome do produto/insumo" },
-                quantidade: { type: "number", description: "Quantidade comprada" },
-                unidade: { type: "string", description: "Unidade: kg, un, L, g, ml, cx (caixa), fd (fardo), pct (pacote), dz (duzia), sc (saco), gl (galao), bd (balde), lta (lata), gf (garrafa)" },
-                valor_total: { type: "number", description: "Valor TOTAL pago em reais. Preencha se o usuario informou o total. Pode ser omitido se apenas o valor unitario foi informado." },
-                valor_unitario: { type: "number", description: "Valor por UNIDADE em reais (ex: 'a 2,50 o kg'). Preencha quando o usuario informou preco por unidade ao inves do total." },
-                fornecedor: { type: ["string", "null"], description: "Nome do fornecedor se mencionado na mensagem" },
+      tools: [{
+        type: "function",
+        function: {
+          name: "register_purchase_batch",
+          description: "Registra um ou mais itens de compra extraidos da mensagem.",
+          parameters: {
+            type: "object",
+            properties: {
+              fornecedor_nome: { type: ["string", "null"] },
+              itens: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    produto: { type: "string" },
+                    quantidade: { type: "number" },
+                    unidade: { type: "string" },
+                    valor_total: { type: "number" },
+                  },
+                  required: ["produto", "quantidade", "unidade", "valor_total"],
+                  additionalProperties: false,
+                },
               },
-              required: ["produto", "quantidade", "unidade"],
-              additionalProperties: false,
             },
+            required: ["itens"],
+            additionalProperties: false,
           },
         },
-      ],
+      }],
       tool_choice: "auto",
     }),
   });
-
-  if (!response.ok) {
-    console.error("AI error:", response.status, await response.text());
-    return null;
-  }
-
-  const data = await response.json();
-  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!toolCall) return null;
-
+  if (!resp.ok) { console.error("AI text error", resp.status, await resp.text()); return null; }
+  const data = await resp.json();
+  const tc = data.choices?.[0]?.message?.tool_calls?.[0];
+  if (!tc) return null;
   try {
-    const raw = JSON.parse(toolCall.function.arguments) as {
-      produto: string; quantidade: number; unidade: string;
-      valor_total?: number; valor_unitario?: number; fornecedor?: string | null;
-    };
-    // Calculate valor_total from valor_unitario if needed
-    if (!raw.valor_total && raw.valor_unitario && raw.quantidade) {
-      raw.valor_total = raw.valor_unitario * raw.quantidade;
-    }
-    // Ensure valor_total exists
-    if (!raw.valor_total || raw.valor_total <= 0) return null;
-    return { ...raw, valor_total: raw.valor_total, fornecedor: raw.fornecedor ?? null } as {
-      produto: string; quantidade: number; unidade: string; valor_total: number; fornecedor: string | null;
-    };
-  } catch {
-    console.error("Failed to parse AI response:", toolCall.function.arguments);
-    return null;
-  }
+    const raw = JSON.parse(tc.function.arguments);
+    const itens: ParsedItem[] = (raw.itens || [])
+      .filter((i: any) => i.produto && i.quantidade > 0 && i.valor_total > 0)
+      .map((i: any) => ({
+        produto: String(i.produto).trim(),
+        quantidade: Number(i.quantidade),
+        unidade: String(i.unidade || "un"),
+        valor_total: Number(i.valor_total),
+      }));
+    if (itens.length === 0) return null;
+    return { itens, fornecedor_nome: raw.fornecedor_nome ?? null, fornecedor_cnpj: null };
+  } catch { return null; }
 }
 
 function getSupabase() {
   return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 }
 
-interface ProductMatch { id: string; name: string; unit: string; score: number }
-
-/** Find matching products. Returns sorted list of candidates above threshold. */
-async function findProducts(supabase: ReturnType<typeof getSupabase>, productName: string): Promise<ProductMatch[]> {
-  const { data: products, error } = await supabase
-    .from("products").select("id, name, unit").eq("is_active", true);
-  if (error || !products) return [];
-
-  const scored: ProductMatch[] = [];
-  for (const p of products) {
-    const score = scoreProduct(productName, p.name);
-    if (score >= 0.3) {
-      scored.push({ id: p.id, name: p.name, unit: p.unit, score });
-    }
-  }
-
-  // Also try ilike fallback
-  if (scored.length === 0) {
-    const nq = normalize(productName);
-    const { data: ilikeProd } = await supabase
-      .from("products").select("id, name, unit").eq("is_active", true)
-      .ilike("name", `%${nq}%`);
-    if (ilikeProd?.length) {
-      for (const p of ilikeProd) {
-        scored.push({ id: p.id, name: p.name, unit: p.unit, score: 0.6 });
-      }
-    }
-  }
-
-  scored.sort((a, b) => b.score - a.score);
-  console.log(`Product matching for "${productName}":`, JSON.stringify(scored.slice(0, 5)));
-  return scored;
-}
-
-async function getActiveSuppliers(supabase: ReturnType<typeof getSupabase>) {
-  const { data } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
-  return data || [];
-}
-
-async function insertPurchase(
-  supabase: ReturnType<typeof getSupabase>,
-  productId: string, quantity: number, totalPrice: number,
-  supplierId: string | null, message: string
-) {
-  return supabase.from("purchase_history").insert({
-    product_id: productId, quantity, total_price: totalPrice,
-    supplier_id: supplierId, purchase_date: new Date().toISOString().split("T")[0],
-    notes: `Via WhatsApp: "${message}"`,
-  });
-}
-
-function buildConfirmation(
-  productName: string, quantity: number, unit: string,
-  totalPrice: number, supplierName: string | null
-) {
-  const unitPrice = totalPrice / quantity;
-  return `✅ *Compra registrada!*\n\n📦 *Produto:* ${productName}\n📊 *Quantidade:* ${quantity} ${unit}\n💰 *Total:* R$ ${totalPrice.toFixed(2)}\n📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${unit}${supplierName ? `\n🏪 *Fornecedor:* ${supplierName}` : ""}\n\n_Estoque atualizado automaticamente._`;
-}
-
-// --- State handlers ---
-
-type Pending = {
-  id: string; product_id: string; quantity: number; total_price: number;
-  unit: string; message_original: string; product_options: any; supplier_id: string | null;
+type ResolvedItem = {
+  produto: string;
+  quantidade: number;
+  unidade: string;
+  valor_total: number;
+  product_id: string | null;
+  product_name: string | null;
+  needs_creation: boolean;
+  ambiguous_options?: { id: string; name: string }[];
+  suggested_category_id?: string | null;
+  excluded?: boolean;
 };
 
-async function handleProductChoice(
-  supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: Pending
-) {
-  const options: { id: string; name: string }[] = pending.product_options || [];
-  let chosen: { id: string; name: string } | null = null;
-
-  const num = parseInt(messageText.trim(), 10);
-  if (!isNaN(num) && num >= 1 && num <= options.length) {
-    chosen = options[num - 1];
-  } else {
-    // Semantic search against the available options
-    const scored = options
-      .map(o => ({ ...o, score: scoreProduct(messageText, o.name) }))
-      .filter(o => o.score >= 0.5)
-      .sort((a, b) => b.score - a.score);
-
-    if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= 0.15)) {
-      chosen = scored[0];
-    } else if (scored.length > 1) {
-      let msg = `🔍 Ainda ambíguo. Seja mais específico ou escolha pelo número:\n\n`;
-      options.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
-      msg += `\n_Responda com o número ou o nome._`;
-      await sendWhatsApp(phone, msg);
-      return { ok: true, awaiting_product_choice: true };
-    } else {
-      let msg = `❌ Não encontrei esse produto na lista. Escolha pelo número:\n\n`;
-      options.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
-      msg += `\n_Responda com o número ou o nome._`;
-      await sendWhatsApp(phone, msg);
-      return { ok: true, awaiting_product_choice: true };
-    }
-  }
-
-  // Product chosen — now check if supplier still needs resolving
-  if (!pending.supplier_id) {
-    // No supplier resolved yet — ask for supplier before confirmation
-    await supabase.from("pending_whatsapp_purchases").update({
-      product_id: chosen.id,
-      status: "awaiting_supplier",
-      product_options: null,
-    }).eq("id", pending.id);
-
-    const suppliers = await getActiveSuppliers(supabase);
-    let msg = `✅ Produto: *${chosen.name}*\n\n`;
-    msg += `🏪 *Escolha o fornecedor:*\n`;
-    suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-    msg += `\n_Responda com o número ou o nome._`;
-
-    await sendWhatsApp(phone, msg);
-    return { ok: true, awaiting_supplier: true };
-  }
-
-  // Supplier already resolved — go straight to confirmation
-  await supabase.from("pending_whatsapp_purchases").update({
-    product_id: chosen.id,
-    status: "awaiting_confirmation",
-    product_options: null,
-  }).eq("id", pending.id);
-
-  const { data: supplier } = await supabase.from("suppliers").select("name").eq("id", pending.supplier_id).single();
-  const unitPrice = pending.total_price / pending.quantity;
-  let msg = `🔍 *Confira os dados da compra:*\n\n`;
-  msg += `📦 *Produto:* ${chosen.name}\n`;
-  msg += `📊 *Quantidade:* ${pending.quantity} ${pending.unit}\n`;
-  msg += `💰 *Valor total:* R$ ${pending.total_price.toFixed(2)}\n`;
-  msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${pending.unit}\n`;
-  if (supplier?.name) msg += `🏪 *Fornecedor:* ${supplier.name}\n`;
-  msg += `\n✅ *1* - Confirmar | *2* - Cancelar`;
-
-  await sendWhatsApp(phone, msg);
-  return { ok: true, awaiting_confirmation: true };
-}
-
-async function handleConfirmation(
-  supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: Pending
-) {
-  const answer = normalize(messageText);
-
-  if (answer === "sim" || answer === "s" || answer === "1") {
-    // Fornecedor é obrigatório — se não tem, redirecionar
-    if (!pending.supplier_id) {
-      const suppliers = await getActiveSuppliers(supabase);
-      await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pending.id);
-      let msg = `⚠️ *Fornecedor obrigatório!*\n\n🏪 *Escolha o fornecedor:*\n`;
-      suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-      msg += `\n_Responda com o número ou o nome._`;
-      await sendWhatsApp(phone, msg);
-      return { ok: true, awaiting_supplier: true };
-    }
-    const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
-    let supplierName: string | null = null;
-    if (pending.supplier_id) {
-      const { data: supplier } = await supabase.from("suppliers").select("name").eq("id", pending.supplier_id).single();
-      supplierName = supplier?.name || null;
-    }
-
-    const { error: insertError } = await insertPurchase(
-      supabase, pending.product_id, pending.quantity, pending.total_price,
-      pending.supplier_id, pending.message_original
-    );
-
-    if (insertError) {
-      console.error("Insert error:", insertError);
-      await sendWhatsApp(phone, "❌ Erro ao registrar a compra.");
-      return { ok: false, error: "insert_failed" };
-    }
-
-    await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
-    await sendWhatsApp(phone, buildConfirmation(
-      product?.name || "Produto", pending.quantity, pending.unit, pending.total_price, supplierName
-    ));
-    return { ok: true, product: product?.name, supplier: supplierName };
-  }
-
-  if (answer === "nao" || answer === "n" || answer === "não" || answer === "2" || answer === "0") {
-    await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
-    await sendWhatsApp(phone, "❌ Compra cancelada. Envie novamente com os dados corretos.");
-    return { ok: true, cancelled: true };
-  }
-
-  await sendWhatsApp(phone, "🔄 Responda *1* para confirmar ou *2* para cancelar.");
-  return { ok: true, awaiting_confirmation: true };
-}
-
-async function handleSupplierSelection(
-  supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: Pending
-) {
-  const suppliers = await getActiveSuppliers(supabase);
-  let supplierId: string | null = null;
-  let supplierName: string | null = null;
-
-  const answer = normalize(messageText);
-  const num = parseInt(messageText.trim(), 10);
-  if (!isNaN(num) && num >= 1) {
-    if (num > suppliers.length) {
-      await sendWhatsApp(phone, `❌ Número inválido. Escolha de 1 a ${suppliers.length}.`);
-      return { ok: true, awaiting_supplier: true };
-    } else {
-      supplierId = suppliers[num - 1].id;
-      supplierName = suppliers[num - 1].name;
-    }
-  } else if (!isNaN(num) && num === 0) {
-    // Fornecedor obrigatório — não aceitar 0
-    let msg = `⚠️ *Fornecedor obrigatório!* Escolha pelo número:\n\n`;
-    suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-    msg += `\n_Responda com o número ou o nome._`;
-    await sendWhatsApp(phone, msg);
-    return { ok: true, awaiting_supplier: true };
-  } else {
-    // Semantic search against suppliers
-    const scored = suppliers
-      .map(s => ({ ...s, score: scoreProduct(messageText, s.name) }))
+async function resolveItems(supabase: ReturnType<typeof getSupabase>, items: ParsedItem[]): Promise<ResolvedItem[]> {
+  const { data: products } = await supabase.from("products").select("id, name, unit").eq("is_active", true);
+  const list = products || [];
+  const resolved: ResolvedItem[] = [];
+  for (const it of items) {
+    const scored = list
+      .map(p => ({ ...p, score: scoreProduct(it.produto, p.name) }))
       .filter(s => s.score >= 0.5)
       .sort((a, b) => b.score - a.score);
-
-    if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= 0.15)) {
-      supplierId = scored[0].id;
-      supplierName = scored[0].name;
+    let r: ResolvedItem = {
+      ...it,
+      product_id: null, product_name: null, needs_creation: false,
+    };
+    if (scored.length > 0 && scored[0].score >= 0.8 && (scored.length === 1 || scored[0].score - scored[1].score >= 0.15)) {
+      r.product_id = scored[0].id;
+      r.product_name = scored[0].name;
     } else if (scored.length > 1) {
-      let msg = `🔍 Encontrei mais de um fornecedor parecido. Escolha pelo número:\n\n`;
-      suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-      msg += `\n_Responda com o número ou o nome._`;
-      await sendWhatsApp(phone, msg);
-      return { ok: true, awaiting_supplier: true };
+      r.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name }));
     } else {
-      let msg = `❌ Fornecedor não encontrado. Escolha pelo número:\n\n`;
-      suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-      msg += `\n_Responda com o número ou o nome._`;
+      r.needs_creation = true;
+    }
+    resolved.push(r);
+  }
+  return resolved;
+}
+
+async function resolveSupplier(
+  supabase: ReturnType<typeof getSupabase>,
+  name: string | null, cnpj: string | null
+): Promise<{ supplier_id: string | null; supplier_name: string | null; needs_alias: boolean }> {
+  if (cnpj) {
+    const { data: bySupCnpj } = await supabase.from("suppliers").select("id, name").eq("cnpj", cnpj).maybeSingle();
+    if (bySupCnpj) return { supplier_id: bySupCnpj.id, supplier_name: bySupCnpj.name, needs_alias: false };
+    const { data: byAliasCnpj } = await supabase.from("supplier_aliases").select("supplier_id, suppliers(name)").eq("cnpj", cnpj).maybeSingle();
+    if (byAliasCnpj) return { supplier_id: byAliasCnpj.supplier_id, supplier_name: (byAliasCnpj as any).suppliers?.name || null, needs_alias: false };
+  }
+  if (name) {
+    const aliasNorm = normalize(name);
+    const { data: byAlias } = await supabase.from("supplier_aliases").select("supplier_id, suppliers(name)").eq("alias_normalized", aliasNorm).maybeSingle();
+    if (byAlias) return { supplier_id: byAlias.supplier_id, supplier_name: (byAlias as any).suppliers?.name || null, needs_alias: false };
+    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true);
+    const scored = (suppliers || []).map(s => ({ ...s, score: scoreProduct(name, s.name) })).sort((a, b) => b.score - a.score);
+    if (scored.length && scored[0].score >= 0.8 && (scored.length === 1 || scored[0].score - scored[1].score >= 0.15)) {
+      return { supplier_id: scored[0].id, supplier_name: scored[0].name, needs_alias: false };
+    }
+    return { supplier_id: null, supplier_name: null, needs_alias: true };
+  }
+  return { supplier_id: null, supplier_name: null, needs_alias: false };
+}
+
+function fmtCurrency(v: number) { return v.toFixed(2).replace(".", ","); }
+
+function buildBatchPreview(items: ResolvedItem[], supplierName: string | null, detectedSupplier: string | null): string {
+  const active = items.filter(i => !i.excluded);
+  const total = active.reduce((s, i) => s + i.valor_total, 0);
+  let msg = supplierName
+    ? `🧾 *Nota de ${supplierName}* — ${active.length} itens, R$ ${fmtCurrency(total)}\n\n`
+    : detectedSupplier
+      ? `🧾 *Nota* (${detectedSupplier}) — ${active.length} itens, R$ ${fmtCurrency(total)}\n\n`
+      : `🧾 *Compra* — ${active.length} itens, R$ ${fmtCurrency(total)}\n\n`;
+  items.forEach((i, idx) => {
+    const n = idx + 1;
+    if (i.excluded) {
+      msg += `~${n}. ${i.produto}~ ❌ removido\n`;
+    } else {
+      const tag = i.needs_creation ? "🆕 cadastrar" : (i.product_name ? "✅" : "❓");
+      const display = i.product_name || i.produto;
+      msg += `${n}. ${display} — ${i.quantidade} ${i.unidade} — R$ ${fmtCurrency(i.valor_total)} ${tag}\n`;
+    }
+  });
+  msg += `\n*1* - Confirmar tudo\n*2* - Cancelar\n*r N* - Remover item N (ex: r 3)`;
+  return msg;
+}
+
+async function sendNextNewProductPrompt(
+  supabase: ReturnType<typeof getSupabase>, phone: string, pendingId: string, items: ResolvedItem[]
+): Promise<boolean> {
+  const idx = items.findIndex(i => !i.excluded && i.needs_creation && !i.product_id);
+  if (idx === -1) return false;
+  const it = items[idx];
+  // sugerir categoria pelo nome
+  const { data: cats } = await supabase.from("product_categories").select("id, name").order("name");
+  let suggestedCat: { id: string; name: string } | null = null;
+  if (cats?.length) {
+    const scored = cats.map(c => ({ ...c, score: scoreProduct(it.produto, c.name) })).sort((a, b) => b.score - a.score);
+    if (scored[0].score >= 0.4) suggestedCat = { id: scored[0].id, name: scored[0].name };
+  }
+  it.suggested_category_id = suggestedCat?.id || null;
+
+  await supabase.from("pending_whatsapp_purchases").update({
+    status: "awaiting_new_product_confirm",
+    current_item_index: idx,
+    items: items as any,
+  }).eq("id", pendingId);
+
+  let msg = `🆕 Item ${idx + 1}/${items.length}: *${it.produto}*\n`;
+  msg += `Quantidade: ${it.quantidade} ${it.unidade} — R$ ${fmtCurrency(it.valor_total)}\n\n`;
+  msg += `Esse produto não está cadastrado. O que fazer?\n\n`;
+  msg += `*1* - Cadastrar (categoria: ${suggestedCat?.name || "A definir"}, unid: ${it.unidade})\n`;
+  msg += `*2* - Vincular a outro produto (responda o nome)\n`;
+  msg += `*3* - Pular este item`;
+  await sendWhatsApp(phone, msg);
+  return true;
+}
+
+async function sendNextAmbiguousPrompt(
+  supabase: ReturnType<typeof getSupabase>, phone: string, pendingId: string, items: ResolvedItem[]
+): Promise<boolean> {
+  const idx = items.findIndex(i => !i.excluded && !i.product_id && !i.needs_creation && i.ambiguous_options?.length);
+  if (idx === -1) return false;
+  const it = items[idx];
+  await supabase.from("pending_whatsapp_purchases").update({
+    status: "awaiting_product_choice",
+    current_item_index: idx,
+    items: items as any,
+  }).eq("id", pendingId);
+  let msg = `🔍 Item ${idx + 1}/${items.length}: "*${it.produto}*"\n\nMais de um produto parecido. Escolha:\n`;
+  it.ambiguous_options!.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
+  msg += `*N* - Cadastrar como novo\n*P* - Pular este item`;
+  await sendWhatsApp(phone, msg);
+  return true;
+}
+
+async function advanceFlow(
+  supabase: ReturnType<typeof getSupabase>, phone: string, pendingId: string, pending: any
+): Promise<void> {
+  const items = (pending.items || []) as ResolvedItem[];
+  // 1) supplier alias?
+  if (pending.detected_supplier_name && !pending.supplier_id) {
+    // attempt resolve again (in case user added)
+    const r = await resolveSupplier(supabase, pending.detected_supplier_name, pending.detected_supplier_cnpj);
+    if (r.supplier_id) {
+      await supabase.from("pending_whatsapp_purchases").update({ supplier_id: r.supplier_id }).eq("id", pendingId);
+      pending.supplier_id = r.supplier_id;
+    } else {
+      await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier_alias" }).eq("id", pendingId);
+      const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+      let msg = `🏪 *Fornecedor da nota:* ${pending.detected_supplier_name}`;
+      if (pending.detected_supplier_cnpj) msg += ` (CNPJ ${pending.detected_supplier_cnpj})`;
+      msg += `\n\nEsse nome não está cadastrado. A qual fornecedor corresponde?\n\n`;
+      (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      msg += `*N* - Cadastrar como novo fornecedor\n*P* - Sem fornecedor`;
       await sendWhatsApp(phone, msg);
-      return { ok: true, awaiting_supplier: true };
+      return;
     }
   }
-
-  if (!supplierId) {
-    let msg = `⚠️ *Fornecedor obrigatório!* Escolha pelo número:\n\n`;
-    suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-    msg += `\n_Responda com o número ou o nome._`;
+  if (!pending.supplier_id && !pending.detected_supplier_name) {
+    // no supplier at all — ask
+    await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pendingId);
+    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+    let msg = `🏪 *Escolha o fornecedor:*\n`;
+    (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+    msg += `*P* - Sem fornecedor`;
     await sendWhatsApp(phone, msg);
-    return { ok: true, awaiting_supplier: true };
+    return;
+  }
+  // 2) ambiguous items
+  if (await sendNextAmbiguousPrompt(supabase, phone, pendingId, items)) return;
+  // 3) new product items
+  if (await sendNextNewProductPrompt(supabase, phone, pendingId, items)) return;
+  // 4) batch confirm
+  await supabase.from("pending_whatsapp_purchases").update({
+    status: "awaiting_batch_confirm",
+    items: items as any,
+  }).eq("id", pendingId);
+  const { data: sup } = await supabase.from("suppliers").select("name").eq("id", pending.supplier_id).maybeSingle();
+  await sendWhatsApp(phone, buildBatchPreview(items, sup?.name || null, pending.detected_supplier_name));
+}
+
+async function commitBatch(
+  supabase: ReturnType<typeof getSupabase>, phone: string, pending: any
+): Promise<void> {
+  const items: ResolvedItem[] = (pending.items || []).filter((i: ResolvedItem) => !i.excluded);
+  if (items.length === 0) {
+    await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
+    await sendWhatsApp(phone, "❌ Nenhum item para registrar. Compra cancelada.");
+    return;
+  }
+  let inserted = 0;
+  let failed = 0;
+  for (const it of items) {
+    let productId = it.product_id;
+    if (!productId && it.needs_creation) {
+      const { data: newProd, error: pErr } = await supabase.from("products").insert({
+        name: it.produto,
+        unit: it.unidade,
+        category_id: it.suggested_category_id || null,
+        is_active: true,
+      }).select("id").single();
+      if (pErr || !newProd) { console.error("create product failed", pErr); failed++; continue; }
+      productId = newProd.id;
+    }
+    if (!productId) { failed++; continue; }
+    const { error: insErr } = await supabase.from("purchase_history").insert({
+      product_id: productId,
+      quantity: it.quantidade,
+      total_price: it.valor_total,
+      supplier_id: pending.supplier_id,
+      purchase_date: new Date().toISOString().split("T")[0],
+      notes: `Via WhatsApp: ${pending.message_original?.substring(0, 200) || ""}`,
+    });
+    if (insErr) { console.error("insert purchase failed", insErr); failed++; }
+    else inserted++;
+  }
+  await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
+  const total = items.reduce((s, i) => s + i.valor_total, 0);
+  let msg = `✅ *${inserted} compras registradas!*\n💰 Total: R$ ${fmtCurrency(total)}`;
+  if (failed > 0) msg += `\n⚠️ ${failed} item(ns) falharam.`;
+  msg += `\n_Estoque atualizado automaticamente._`;
+  await sendWhatsApp(phone, msg);
+}
+
+// --- Pending state handlers (multi-item) ---
+
+async function handlePending(
+  supabase: ReturnType<typeof getSupabase>, phone: string, messageText: string, pending: any
+): Promise<void> {
+  const text = messageText.trim();
+  const lower = normalize(text);
+  const items = (pending.items || []) as ResolvedItem[];
+  const idx = pending.current_item_index ?? 0;
+
+  // remove command from batch confirm
+  if (pending.status === "awaiting_batch_confirm") {
+    if (lower === "1" || lower === "sim" || lower === "s") {
+      await commitBatch(supabase, phone, pending);
+      return;
+    }
+    if (lower === "2" || lower === "nao" || lower === "não" || lower === "n") {
+      await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
+      await sendWhatsApp(phone, "❌ Compra cancelada.");
+      return;
+    }
+    const rm = lower.match(/^r\s*(\d+)$/);
+    if (rm) {
+      const n = parseInt(rm[1], 10) - 1;
+      if (n >= 0 && n < items.length) {
+        items[n].excluded = true;
+        await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+        const { data: sup } = await supabase.from("suppliers").select("name").eq("id", pending.supplier_id).maybeSingle();
+        await sendWhatsApp(phone, buildBatchPreview(items, sup?.name || null, pending.detected_supplier_name));
+      } else {
+        await sendWhatsApp(phone, `❌ Item ${rm[1]} não existe.`);
+      }
+      return;
+    }
+    await sendWhatsApp(phone, "🔄 Responda *1* (confirmar), *2* (cancelar) ou *r N* (remover item N).");
+    return;
   }
 
-  // Supplier resolved — save and move to confirmation
-  await supabase.from("pending_whatsapp_purchases").update({
-    supplier_id: supplierId,
-    status: "awaiting_confirmation",
-  }).eq("id", pending.id);
+  if (pending.status === "awaiting_supplier_alias" || pending.status === "awaiting_supplier") {
+    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+    const sList = suppliers || [];
+    if (lower === "p") {
+      // proceed without supplier
+      pending.supplier_id = null;
+      await supabase.from("pending_whatsapp_purchases").update({ supplier_id: null, detected_supplier_name: null }).eq("id", pending.id);
+      pending.detected_supplier_name = null;
+      await advanceFlow(supabase, phone, pending.id, pending);
+      return;
+    }
+    if (lower === "n" && pending.detected_supplier_name) {
+      const { data: newSup, error } = await supabase.from("suppliers").insert({
+        name: pending.detected_supplier_name,
+        cnpj: pending.detected_supplier_cnpj,
+        is_active: true,
+      }).select("id, name").single();
+      if (error || !newSup) {
+        await sendWhatsApp(phone, "❌ Erro ao cadastrar fornecedor. Escolha um da lista.");
+        return;
+      }
+      pending.supplier_id = newSup.id;
+      await supabase.from("pending_whatsapp_purchases").update({ supplier_id: newSup.id }).eq("id", pending.id);
+      await advanceFlow(supabase, phone, pending.id, pending);
+      return;
+    }
+    const num = parseInt(text, 10);
+    let chosen: { id: string; name: string } | null = null;
+    if (!isNaN(num) && num >= 1 && num <= sList.length) chosen = sList[num - 1];
+    else {
+      const scored = sList.map(s => ({ ...s, score: scoreProduct(text, s.name) })).filter(s => s.score >= 0.5).sort((a, b) => b.score - a.score);
+      if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= 0.15)) chosen = scored[0];
+    }
+    if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número da lista, *N* (novo) ou *P* (sem)."); return; }
+    pending.supplier_id = chosen.id;
+    // se veio de mídia com nome detectado, gravar alias
+    if (pending.detected_supplier_name) {
+      const aliasNorm = normalize(pending.detected_supplier_name);
+      await supabase.from("supplier_aliases").upsert({
+        supplier_id: chosen.id,
+        alias: pending.detected_supplier_name,
+        alias_normalized: aliasNorm,
+        cnpj: pending.detected_supplier_cnpj,
+      }, { onConflict: "alias_normalized" });
+    }
+    await supabase.from("pending_whatsapp_purchases").update({ supplier_id: chosen.id }).eq("id", pending.id);
+    await advanceFlow(supabase, phone, pending.id, pending);
+    return;
+  }
 
-  const { data: product } = await supabase.from("products").select("name").eq("id", pending.product_id).single();
+  if (pending.status === "awaiting_product_choice") {
+    const it = items[idx];
+    if (!it?.ambiguous_options?.length) { await advanceFlow(supabase, phone, pending.id, pending); return; }
+    if (lower === "p") {
+      it.excluded = true;
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      await advanceFlow(supabase, phone, pending.id, pending);
+      return;
+    }
+    if (lower === "n") {
+      it.needs_creation = true;
+      it.ambiguous_options = undefined;
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      await advanceFlow(supabase, phone, pending.id, pending);
+      return;
+    }
+    const num = parseInt(text, 10);
+    let chosen = null;
+    if (!isNaN(num) && num >= 1 && num <= it.ambiguous_options.length) chosen = it.ambiguous_options[num - 1];
+    else {
+      const sc = it.ambiguous_options.map(o => ({ ...o, score: scoreProduct(text, o.name) })).filter(o => o.score >= 0.5).sort((a, b) => b.score - a.score);
+      if (sc.length === 1 || (sc.length > 1 && sc[0].score - sc[1].score >= 0.15)) chosen = sc[0];
+    }
+    if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número, *N* (novo) ou *P* (pular)."); return; }
+    it.product_id = chosen.id;
+    it.product_name = chosen.name;
+    it.ambiguous_options = undefined;
+    await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+    await advanceFlow(supabase, phone, pending.id, pending);
+    return;
+  }
 
-  const unitPrice = pending.total_price / pending.quantity;
-  let msg = `🔍 *Confira os dados da compra:*\n\n`;
-  msg += `📦 *Produto:* ${product?.name}\n`;
-  msg += `📊 *Quantidade:* ${pending.quantity} ${pending.unit}\n`;
-  msg += `💰 *Valor total:* R$ ${pending.total_price.toFixed(2)}\n`;
-  msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${pending.unit}\n`;
-  if (supplierName) msg += `🏪 *Fornecedor:* ${supplierName}\n`;
-  msg += `\n✅ *1* - Confirmar | *2* - Cancelar`;
-
-  await sendWhatsApp(phone, msg);
-  return { ok: true, awaiting_confirmation: true };
+  if (pending.status === "awaiting_new_product_confirm") {
+    const it = items[idx];
+    if (!it) { await advanceFlow(supabase, phone, pending.id, pending); return; }
+    if (lower === "1") {
+      // mantém needs_creation=true, será criado no commit
+      it.needs_creation = true;
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      // marcar como resolvido para não repetir o prompt
+      it.product_name = it.produto;
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      await advanceFlow(supabase, phone, pending.id, pending);
+      return;
+    }
+    if (lower === "3" || lower === "p") {
+      it.excluded = true;
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      await advanceFlow(supabase, phone, pending.id, pending);
+      return;
+    }
+    if (lower === "2") {
+      await sendWhatsApp(phone, "📝 Digite o nome do produto cadastrado para vincular:");
+      // mantém status, próxima mensagem será tratada como nome livre
+      return;
+    }
+    // tratar texto livre como busca
+    const { data: products } = await supabase.from("products").select("id, name, unit").eq("is_active", true);
+    const scored = (products || []).map(p => ({ ...p, score: scoreProduct(text, p.name) })).filter(s => s.score >= 0.5).sort((a, b) => b.score - a.score);
+    if (scored.length === 0) { await sendWhatsApp(phone, "❌ Não achei. Tente outro nome, ou responda *1* (cadastrar) ou *3* (pular)."); return; }
+    if (scored.length > 1 && scored[0].score - scored[1].score < 0.15) {
+      let msg = `🔍 Vários produtos parecidos:\n`;
+      scored.slice(0, 4).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      msg += `\nResponda o número exato.`;
+      it.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name }));
+      it.needs_creation = false;
+      await supabase.from("pending_whatsapp_purchases").update({
+        items: items as any, status: "awaiting_product_choice",
+      }).eq("id", pending.id);
+      await sendWhatsApp(phone, msg);
+      return;
+    }
+    it.product_id = scored[0].id;
+    it.product_name = scored[0].name;
+    it.needs_creation = false;
+    await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+    await advanceFlow(supabase, phone, pending.id, pending);
+    return;
+  }
 }
 
 // --- Main handler ---
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     const body = await req.json();
-    console.log("Webhook received:", JSON.stringify(body).substring(0, 500));
-
+    console.log("Webhook:", JSON.stringify(body).substring(0, 500));
     if (body.fromMe || body.isGroup || body.isStatusReply) {
-      return new Response(JSON.stringify({ ok: true, ignored: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ ok: true, ignored: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
-    const messageText = body.text?.message || body.message?.text || body.text || "";
     const phone = body.phone || body.from || "";
+    const messageText = body.text?.message || body.message?.text || body.text || "";
     const imageUrl = body.image?.imageUrl || body.imageUrl || null;
     const imageCaption = body.image?.caption || body.caption || "";
-    const isImageMessage = !!imageUrl;
+    const docUrl = body.document?.documentUrl || body.document?.url || null;
+    const docMime = body.document?.mimeType || body.document?.mime_type || null;
+    const docCaption = body.document?.caption || "";
+    if (!phone) return new Response(JSON.stringify({ ok: true, no_phone: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    if (!messageText && !isImageMessage) {
-      return new Response(JSON.stringify({ ok: true, no_content: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (!phone) {
-      return new Response(JSON.stringify({ ok: true, no_phone: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    console.log(`Message from ${phone}: ${isImageMessage ? "[IMAGE]" : messageText}`);
     const supabase = getSupabase();
 
-    // 1. Check for pending interactions (only for text messages)
-    if (messageText && !isImageMessage) {
+    // Pending interactions take priority for text
+    if (messageText && !imageUrl && !docUrl) {
       const { data: pendingList } = await supabase
-        .from("pending_whatsapp_purchases")
-        .select("*")
-        .eq("phone", phone)
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1);
-
+        .from("pending_whatsapp_purchases").select("*").eq("phone", phone)
+        .gt("expires_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(1);
       if (pendingList?.length) {
-        const pending = pendingList[0];
-        let result;
-
-        if (pending.status === "awaiting_product_choice") {
-          result = await handleProductChoice(supabase, phone, messageText, pending);
-        } else if (pending.status === "awaiting_confirmation") {
-          result = await handleConfirmation(supabase, phone, messageText, pending);
-        } else if (pending.status === "awaiting_supplier") {
-          result = await handleSupplierSelection(supabase, phone, messageText, pending);
-        }
-
-        if (result) {
-          return new Response(JSON.stringify(result), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
+        await handlePending(supabase, phone, messageText, pendingList[0]);
+        return new Response(JSON.stringify({ ok: true, handled_pending: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
 
-    // 2. Parse purchase — from IMAGE or TEXT
-    let parsed: { produto: string; quantidade: number; unidade: string; valor_total: number; fornecedor: string | null } | null = null;
+    // Determine media
+    let mediaUrl: string | null = null;
+    let mediaMime: string | null = null;
+    let mediaCaption = "";
+    if (imageUrl) { mediaUrl = imageUrl; mediaMime = "image/jpeg"; mediaCaption = imageCaption; }
+    else if (docUrl) { mediaUrl = docUrl; mediaMime = docMime || "application/pdf"; mediaCaption = docCaption; }
 
-    if (isImageMessage) {
-      console.log("Processing image message:", imageUrl);
-      await sendWhatsApp(phone, "📸 *Analisando imagem...* Aguarde um momento.");
+    let parsed: ParsedBatch | null = null;
+    let originalMessage = messageText;
 
-      const imageData = await downloadImageAsBase64(imageUrl);
-      if (!imageData) {
-        await sendWhatsApp(phone, "❌ Não consegui baixar a imagem. Tente enviar novamente ou digite os dados manualmente.");
-        return new Response(JSON.stringify({ ok: true, image_download_failed: true }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+    if (mediaUrl) {
+      const isPdf = mediaMime === "application/pdf";
+      await sendWhatsApp(phone, isPdf ? "📄 *Lendo PDF da nota...* Pode levar até 1 minuto." : "📸 *Analisando imagem...* Aguarde.");
+      const dl = await downloadAsBase64(mediaUrl);
+      if (!dl) {
+        await sendWhatsApp(phone, "❌ Não consegui baixar a mídia. Tente reenviar.");
+        return new Response(JSON.stringify({ ok: true, download_failed: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-
-      parsed = await parseImageWithAI(imageData.base64, imageData.mimeType, imageCaption || undefined);
-      if (!parsed || !parsed.quantidade || parsed.quantidade <= 0 || !parsed.valor_total || parsed.valor_total <= 0) {
-        await sendWhatsApp(phone, "❌ Não consegui identificar dados de compra na imagem.\n\n📝 Dicas:\n- Envie foto nítida da nota/cupom\n- Certifique-se que produto, quantidade e valor estejam visíveis\n- Ou digite: _10kg arroz 60 reais_");
-        return new Response(JSON.stringify({ ok: true, image_not_parsed: true }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      const effectiveMime = isPdf ? "application/pdf" : (dl.mimeType.startsWith("image/") ? dl.mimeType : "image/jpeg");
+      parsed = await parseMediaWithAI(dl.base64, effectiveMime, mediaCaption || undefined);
+      if (!parsed) {
+        await sendWhatsApp(phone, "❌ Não consegui identificar itens de compra na mídia.\n\nTente foto mais nítida, ou digite os itens.");
+        return new Response(JSON.stringify({ ok: true, media_not_parsed: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      originalMessage = `[${isPdf ? "PDF" : "FOTO"}] ${mediaCaption || `${parsed.itens.length} itens`}`;
+    } else if (messageText) {
+      parsed = await parseTextWithAI(messageText);
+      if (!parsed) {
+        await sendWhatsApp(phone, "❌ Não consegui identificar dados de compra.\n\nExemplos:\n_10kg arroz 60 reais_\n_2cx cerveja 80 + 5kg açúcar 25_\n\n📸 Você também pode enviar foto/PDF da nota fiscal!");
+        return new Response(JSON.stringify({ ok: true, not_purchase: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     } else {
-      parsed = await parseWithAI(messageText);
-      if (!parsed || !parsed.quantidade || parsed.quantidade <= 0 || !parsed.valor_total || parsed.valor_total <= 0) {
-        await sendWhatsApp(phone, "❌ Não consegui identificar todos os dados da compra.\n\nExemplos válidos:\n_10kg arroz 60 reais_\n_comprei feijão 30kg a 2,50 o kg_\n_paguei 150 em 5 fardos de cerveja_\n\n📸 Você também pode *enviar uma foto* da nota fiscal!");
-        return new Response(JSON.stringify({ ok: true, not_purchase: true }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      return new Response(JSON.stringify({ ok: true, no_content: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    console.log("Parsed:", JSON.stringify(parsed));
-    const originalMessage = isImageMessage ? `[FOTO] ${imageCaption || parsed.produto}` : messageText;
+    console.log("Parsed batch:", parsed.itens.length, "items, supplier:", parsed.fornecedor_nome);
 
-    // 3. Find product candidates
-    const candidates = await findProducts(supabase, parsed.produto);
+    // Resolve items + supplier
+    const items = await resolveItems(supabase, parsed.itens);
+    const supRes = await resolveSupplier(supabase, parsed.fornecedor_nome, parsed.fornecedor_cnpj);
 
-    if (candidates.length === 0) {
-      await sendWhatsApp(phone, `❌ Produto "${parsed.produto}" não encontrado no sistema.\n\nVerifique o nome e tente novamente.`);
-      return new Response(JSON.stringify({ ok: false, error: "product_not_found" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Clean old pendings
+    // Clean old pendings for this phone
     await supabase.from("pending_whatsapp_purchases").delete().eq("phone", phone);
 
-    const CONFIDENCE_THRESHOLD = 0.8;
-    const AMBIGUITY_GAP = 0.15;
-    const topScore = candidates[0].score;
-
-    // Check if top match is confident and clearly ahead
-    const isConfident = topScore >= CONFIDENCE_THRESHOLD;
-    const closeRunners = candidates.filter(c => c.score >= topScore - AMBIGUITY_GAP);
-    const isAmbiguous = closeRunners.length > 1;
-
-    if (isConfident && !isAmbiguous) {
-      // Single confident match
-      const product = candidates[0];
-      // Match supplier if extracted by AI
-      let matchedSupplierId: string | null = null;
-      let matchedSupplierName: string | null = null;
-      if (parsed.fornecedor) {
-        const suppliers = await getActiveSuppliers(supabase);
-        const supplierScored = suppliers
-          .map(s => ({ ...s, score: scoreProduct(parsed.fornecedor!, s.name) }))
-          .filter(s => s.score >= 0.5)
-          .sort((a, b) => b.score - a.score);
-        if (supplierScored.length === 1 || (supplierScored.length > 1 && supplierScored[0].score - supplierScored[1].score >= 0.15)) {
-          matchedSupplierId = supplierScored[0].id;
-          matchedSupplierName = supplierScored[0].name;
-        }
-      }
-
-      if (parsed.fornecedor && !matchedSupplierId) {
-        // Supplier mentioned but NOT matched → ask supplier BEFORE confirmation
-        await supabase.from("pending_whatsapp_purchases").insert({
-          phone, product_id: product.id, quantity: parsed.quantidade,
-          total_price: parsed.valor_total, unit: parsed.unidade, message_original: originalMessage,
-          status: "awaiting_supplier", supplier_id: null,
-        });
-
-        const suppliers = await getActiveSuppliers(supabase);
-        let msg = `✅ Produto: *${product.name}*\n`;
-        msg += `❓ Fornecedor "*${parsed.fornecedor}*" não encontrado no sistema.\n\n`;
-        msg += `🏪 *Escolha o fornecedor:*\n`;
-        suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-        msg += `\n_Responda com o número ou o nome._`;
-
-        await sendWhatsApp(phone, msg);
-        return new Response(JSON.stringify({ ok: true, awaiting_supplier: true, product: product.name }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      if (!matchedSupplierId) {
-        // Fornecedor obrigatório — perguntar antes de confirmar
-        await supabase.from("pending_whatsapp_purchases").insert({
-          phone, product_id: product.id, quantity: parsed.quantidade,
-          total_price: parsed.valor_total, unit: parsed.unidade, message_original: originalMessage,
-          status: "awaiting_supplier", supplier_id: null,
-        });
-
-        const suppliers = await getActiveSuppliers(supabase);
-        let msg = `✅ Produto: *${product.name}*\n`;
-        msg += `📊 Quantidade: ${parsed.quantidade} ${parsed.unidade}\n`;
-        msg += `💰 Valor: R$ ${parsed.valor_total.toFixed(2)}\n\n`;
-        msg += `🏪 *Escolha o fornecedor:*\n`;
-        suppliers.forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-        msg += `\n_Responda com o número ou o nome._`;
-
-        await sendWhatsApp(phone, msg);
-        return new Response(JSON.stringify({ ok: true, awaiting_supplier: true, product: product.name }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      // Supplier resolved → go to confirmation with all data
-      await supabase.from("pending_whatsapp_purchases").insert({
-        phone, product_id: product.id, quantity: parsed.quantidade,
-        total_price: parsed.valor_total, unit: parsed.unidade, message_original: originalMessage,
-        status: "awaiting_confirmation", supplier_id: matchedSupplierId,
-      });
-
-      const unitPrice = parsed.valor_total / parsed.quantidade;
-      let msg = `🔍 *Confira os dados da compra:*\n\n`;
-      msg += `📦 *Produto:* ${product.name}\n`;
-      msg += `📊 *Quantidade:* ${parsed.quantidade} ${parsed.unidade}\n`;
-      msg += `💰 *Valor total:* R$ ${parsed.valor_total.toFixed(2)}\n`;
-      msg += `📈 *Preço unit:* R$ ${unitPrice.toFixed(2)}/${parsed.unidade}\n`;
-      msg += `🏪 *Fornecedor:* ${matchedSupplierName}\n`;
-      msg += `\n✅ *1* - Confirmar | *2* - Cancelar`;
-
-      await sendWhatsApp(phone, msg);
-      return new Response(JSON.stringify({ ok: true, awaiting_confirmation: true, product: product.name }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    } else {
-      // Ambiguous or low confidence -> ask user to choose product
-      const options = closeRunners.slice(0, 5); // max 5 options
-
-      // Reuse matchedSupplierId from above (supplier matching already done for confident path)
-      let ambiguousSupplierId: string | null = null;
-      if (parsed.fornecedor) {
-        const suppliers = await getActiveSuppliers(supabase);
-        const supplierScored = suppliers
-          .map(s => ({ ...s, score: scoreProduct(parsed.fornecedor!, s.name) }))
-          .filter(s => s.score >= 0.5)
-          .sort((a, b) => b.score - a.score);
-        if (supplierScored.length === 1 || (supplierScored.length > 1 && supplierScored[0].score - supplierScored[1].score >= 0.15)) {
-          ambiguousSupplierId = supplierScored[0].id;
-        }
-      }
-
-      await supabase.from("pending_whatsapp_purchases").insert({
-        phone, product_id: options[0].id, quantity: parsed.quantidade,
-        total_price: parsed.valor_total, unit: parsed.unidade, message_original: originalMessage,
-        status: "awaiting_product_choice",
-        product_options: options.map(o => ({ id: o.id, name: o.name })),
-        supplier_id: ambiguousSupplierId,
-      });
-
-      let msg = `🔍 Encontrei mais de um produto parecido com "*${parsed.produto}*".\n\n`;
-      msg += `📋 *Qual é o produto correto?*\n`;
-      options.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
-      msg += `\n_Responda com o número ou o nome._`;
-
-      await sendWhatsApp(phone, msg);
-      return new Response(JSON.stringify({ ok: true, awaiting_product_choice: true, candidates: options.map(o => o.name) }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // Insert pending batch — use first item's data for legacy NOT NULL columns? we made them nullable.
+    const { data: pending, error: pErr } = await supabase.from("pending_whatsapp_purchases").insert({
+      phone,
+      message_original: originalMessage,
+      source_type: mediaUrl ? (mediaMime === "application/pdf" ? "pdf" : "image") : "text",
+      items: items as any,
+      detected_supplier_name: parsed.fornecedor_nome,
+      detected_supplier_cnpj: parsed.fornecedor_cnpj,
+      supplier_id: supRes.supplier_id,
+      status: "processing",
+      product_id: items[0]?.product_id || null,
+      quantity: items[0]?.quantidade || null,
+      unit: items[0]?.unidade || null,
+      total_price: items[0]?.valor_total || null,
+    }).select("*").single();
+    if (pErr || !pending) {
+      console.error("pending insert failed", pErr);
+      await sendWhatsApp(phone, "❌ Erro interno ao processar compra.");
+      return new Response(JSON.stringify({ ok: false, error: "pending_insert" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+
+    await advanceFlow(supabase, phone, pending.id, pending);
+    return new Response(JSON.stringify({ ok: true, items: items.length }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("Webhook error:", err);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown" }), {
