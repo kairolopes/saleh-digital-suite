@@ -397,45 +397,60 @@ export type Database = {
       pending_whatsapp_purchases: {
         Row: {
           created_at: string
+          current_item_index: number | null
+          detected_supplier_cnpj: string | null
+          detected_supplier_name: string | null
           expires_at: string
           id: string
+          items: Json | null
           message_original: string | null
           phone: string
-          product_id: string
+          product_id: string | null
           product_options: Json | null
-          quantity: number
+          quantity: number | null
+          source_type: string | null
           status: string
           supplier_id: string | null
-          total_price: number
-          unit: string
+          total_price: number | null
+          unit: string | null
         }
         Insert: {
           created_at?: string
+          current_item_index?: number | null
+          detected_supplier_cnpj?: string | null
+          detected_supplier_name?: string | null
           expires_at?: string
           id?: string
+          items?: Json | null
           message_original?: string | null
           phone: string
-          product_id: string
+          product_id?: string | null
           product_options?: Json | null
-          quantity: number
+          quantity?: number | null
+          source_type?: string | null
           status?: string
           supplier_id?: string | null
-          total_price: number
-          unit: string
+          total_price?: number | null
+          unit?: string | null
         }
         Update: {
           created_at?: string
+          current_item_index?: number | null
+          detected_supplier_cnpj?: string | null
+          detected_supplier_name?: string | null
           expires_at?: string
           id?: string
+          items?: Json | null
           message_original?: string | null
           phone?: string
-          product_id?: string
+          product_id?: string | null
           product_options?: Json | null
-          quantity?: number
+          quantity?: number | null
+          source_type?: string | null
           status?: string
           supplier_id?: string | null
-          total_price?: number
-          unit?: string
+          total_price?: number | null
+          unit?: string | null
         }
         Relationships: [
           {
@@ -978,6 +993,44 @@ export type Database = {
           type?: string | null
         }
         Relationships: []
+      }
+      supplier_aliases: {
+        Row: {
+          alias: string
+          alias_normalized: string
+          cnpj: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          supplier_id: string
+        }
+        Insert: {
+          alias: string
+          alias_normalized: string
+          cnpj?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          supplier_id: string
+        }
+        Update: {
+          alias?: string
+          alias_normalized?: string
+          cnpj?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          supplier_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_aliases_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       suppliers: {
         Row: {
