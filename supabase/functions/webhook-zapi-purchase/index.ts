@@ -148,17 +148,31 @@ REGRAS:
   if (!resp.ok) { console.error("AI media error", resp.status, await resp.text()); return null; }
   const data = await resp.json();
   const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!tc) return null;
+  if (!tc) {
+    console.warn("AI media: no tool_call. Raw:", JSON.stringify(data.choices?.[0]?.message)?.substring(0, 500));
+    return null;
+  }
   try {
     const raw = JSON.parse(tc.function.arguments);
-    const itens: ParsedItem[] = (raw.itens || [])
-      .filter((i: any) => i.produto && i.quantidade > 0 && i.valor_total > 0)
-      .map((i: any) => ({
+    console.log("AI media parsed args:", JSON.stringify(raw).substring(0, 500));
+    const itens: ParsedItem[] = [];
+    for (const i of (raw.itens || [])) {
+      const qty = Number(i.quantidade);
+      let total = Number(i.valor_total);
+      if ((!total || total <= 0) && i.valor_unitario && qty > 0) {
+        total = Number(i.valor_unitario) * qty;
+      }
+      if (!i.produto || !(qty > 0) || !(total > 0)) {
+        console.warn("Item midia descartado:", JSON.stringify(i));
+        continue;
+      }
+      itens.push({
         produto: String(i.produto).trim(),
-        quantidade: Number(i.quantidade),
+        quantidade: qty,
         unidade: String(i.unidade || "un"),
-        valor_total: Number(i.valor_total),
-      }));
+        valor_total: total,
+      });
+    }
     if (itens.length === 0) return null;
     return {
       itens,
@@ -180,11 +194,18 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
         {
           role: "system",
           content: `Voce extrai compras de insumos a partir de mensagens em portugues. Pode haver UM OU MAIS itens.
-- Aceite qualquer ordem. Virgula = decimal.
-- Abreviacoes: cx caixa, fd fardo, pct pacote, un unidade, lt litro, dz duzia, sc saco, gl galao, bd balde, lta lata, gf garrafa.
-- Se vier preco unitario ("a 2,50 o kg"), multiplique pela quantidade para obter valor_total.
+- Aceite qualquer ordem das palavras. Virgula = decimal.
+- Abreviacoes: cx caixa, fd fardo, pct pacote, un unidade, lt litro, dz duzia, sc saco, gl galao, bd balde, lta lata, gf garrafa, kg quilo, g grama.
+- "X reais" / "R$ X" / "a X" = valor_total da compra inteira (nao unitario), salvo se disser "cada", "a unidade", "o kg".
+- Se vier preco unitario explicito ("a 2,50 o kg", "cada um custa 5"), use valor_unitario e nao valor_total.
+- Aceite QUALQUER valor numerico, mesmo que pareca alto (ex: 8000 reais por 20kg).
 - Fornecedor opcional, mencionado por "no/na/do/comprei do".
-- So extraia se TODOS os itens tiverem produto + quantidade + valor.`,
+- SEMPRE chame a tool register_purchase_batch, mesmo com 1 item. Se faltar info, chame mesmo assim com o que conseguir.
+- Exemplos:
+  "20kg cebola 8000 reais" -> {produto:"cebola", quantidade:20, unidade:"kg", valor_total:8000}
+  "bife 10kg 8000 reais" -> {produto:"bife", quantidade:10, unidade:"kg", valor_total:8000}
+  "oleo 24 unidades a 9000 reais" -> {produto:"oleo", quantidade:24, unidade:"un", valor_total:9000}
+  "5kg arroz a 6 o kg" -> {produto:"arroz", quantidade:5, unidade:"kg", valor_unitario:6}`,
         },
         { role: "user", content: messageText },
       ],
@@ -205,9 +226,10 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
                     produto: { type: "string" },
                     quantidade: { type: "number" },
                     unidade: { type: "string" },
-                    valor_total: { type: "number" },
+                    valor_total: { type: ["number", "null"] },
+                    valor_unitario: { type: ["number", "null"] },
                   },
-                  required: ["produto", "quantidade", "unidade", "valor_total"],
+                  required: ["produto", "quantidade", "unidade"],
                   additionalProperties: false,
                 },
               },
@@ -217,26 +239,40 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
           },
         },
       }],
-      tool_choice: "auto",
+      tool_choice: { type: "function", function: { name: "register_purchase_batch" } },
     }),
   });
   if (!resp.ok) { console.error("AI text error", resp.status, await resp.text()); return null; }
   const data = await resp.json();
   const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!tc) return null;
+  if (!tc) {
+    console.warn("AI text: no tool_call. Raw message:", JSON.stringify(data.choices?.[0]?.message)?.substring(0, 500));
+    return null;
+  }
   try {
     const raw = JSON.parse(tc.function.arguments);
-    const itens: ParsedItem[] = (raw.itens || [])
-      .filter((i: any) => i.produto && i.quantidade > 0 && i.valor_total > 0)
-      .map((i: any) => ({
+    console.log("AI text parsed args:", JSON.stringify(raw).substring(0, 500));
+    const itens: ParsedItem[] = [];
+    for (const i of (raw.itens || [])) {
+      const qty = Number(i.quantidade);
+      let total = Number(i.valor_total);
+      if ((!total || total <= 0) && i.valor_unitario && qty > 0) {
+        total = Number(i.valor_unitario) * qty;
+      }
+      if (!i.produto || !(qty > 0) || !(total > 0)) {
+        console.warn("Item descartado pelo filtro:", JSON.stringify(i));
+        continue;
+      }
+      itens.push({
         produto: String(i.produto).trim(),
-        quantidade: Number(i.quantidade),
+        quantidade: qty,
         unidade: String(i.unidade || "un"),
-        valor_total: Number(i.valor_total),
-      }));
+        valor_total: total,
+      });
+    }
     if (itens.length === 0) return null;
     return { itens, fornecedor_nome: raw.fornecedor_nome ?? null, fornecedor_cnpj: null };
-  } catch { return null; }
+  } catch (e) { console.error("parse text tool failed", e); return null; }
 }
 
 function getSupabase() {

@@ -1,113 +1,47 @@
-## Objetivo
+## Diagnóstico
 
-Expandir `webhook-zapi-purchase` para aceitar **fotos, PDFs e notas fiscais** com **múltiplos itens**, usando o Gemini multimodal (sem OCR externo). Confirmação em lote, fornecedor com memória de apelidos, e produtos novos com pergunta antes de cadastrar.
+Olhei os logs da função `webhook-zapi-purchase` no momento em que você mandou `20kg cebola 8000 reais`, `bife 10kg 8000 reais` e `oleo 24 unidades a 9000 reais`. Em **todas** essas tentativas o webhook recebeu a mensagem e respondeu em ~1s — porém **sem o log "Parsed batch"**, e o usuário viu *"Não consegui identificar dados de compra"*. Isso significa que `parseTextWithAI` retornou `null`. Em apenas uma tentativa posterior o parse funcionou.
 
-## Hoje vs. Depois
+### Causas prováveis
 
-| | Hoje | Depois |
-|---|---|---|
-| Texto WhatsApp | ✅ 1 item | ✅ N itens |
-| Foto | ✅ 1 item (item principal) | ✅ N itens da nota inteira |
-| PDF | ❌ | ✅ N itens |
-| Áudio | ❌ | (fora desta entrega) |
-| Confirmação | item único | **lote** ("1=confirmar tudo, 2=cancelar") |
-| Produto não cadastrado | matching obriga escolha | **pergunta** antes de criar |
-| Fornecedor | escolher da lista toda vez | **detecta da nota + aprende apelidos** |
+1. **`tool_choice: "auto"` no parser de texto** (linha 220) — deixa o Gemini decidir se chama a tool. Quando o preço soa "absurdo" (8000 reais por 20kg de cebola), o modelo às vezes responde em texto livre em vez de chamar `register_purchase_batch`. No parser de mídia já usamos `tool_choice: required` — texto deveria fazer o mesmo.
+
+2. **Filtro silencioso muito agressivo** (linha 230): `i.quantidade > 0 && i.valor_total > 0` descarta itens sem dizer por quê. Se o modelo chamou a tool mas mandou um campo errado (ex: `valor_unitario` em vez de `valor_total`), o array fica vazio e cai em "não identificado".
+
+3. **Falta de log de diagnóstico**: hoje só logamos quando o parse dá certo. Quando falha, não dá pra saber se foi a IA que não chamou tool, se foi filtro, ou erro de JSON.
+
+4. **Mensagem de erro pouco útil**: o usuário não sabe se o problema é o formato, a IA, ou bug. Hoje só recebe a lista de exemplos.
 
 ## Mudanças
 
-### 1. Banco de dados (migration)
+### 1. `supabase/functions/webhook-zapi-purchase/index.ts`
 
-**`supplier_aliases`** (nova tabela) — memória de nomes alternativos:
-```
-id, supplier_id (FK suppliers), alias text, cnpj text nullable, created_at
-unique(alias normalizado)
-```
-RLS: admin/estoque manage; staff view.
+**Em `parseTextWithAI`:**
+- Trocar `tool_choice: "auto"` → `tool_choice: { type: "function", function: { name: "register_purchase_batch" } }` (forçar chamada da tool, igual ao parser de mídia).
+- Adicionar logs:
+  - `console.log("AI text raw response:", JSON.stringify(data.choices?.[0]?.message))` quando não vier `tool_calls`.
+  - `console.log("AI text parsed args:", raw)` antes do filtro.
+  - `console.warn("Item descartado pelo filtro:", i)` para cada item filtrado.
+- Aceitar `valor_unitario` como fallback: se `valor_total` ausente mas `valor_unitario` e `quantidade` > 0 → calcular total.
+- Reforçar prompt do sistema com exemplo: `"20kg cebola 8000 reais"` → `quantidade=20, unidade=kg, valor_total=8000`. Deixar claro que valores grandes são válidos.
 
-**`pending_whatsapp_purchases`** (alterar):
-- `items jsonb` — array `[{produto, quantidade, unidade, valor_total, product_id?, needs_creation?, suggested_category?}, ...]`
-- `current_item_index int default 0` — para perguntas item-a-item de produto novo
-- novo `status`: `awaiting_supplier_alias`, `awaiting_new_product_confirm`, `awaiting_batch_confirm`
+**Em `parseMediaWithAI`:** aplicar a mesma melhoria de fallback `valor_unitario` e logs.
 
-### 2. Edge function `webhook-zapi-purchase`
+**Mensagem de erro mais útil** (linha 700): incluir um motivo quando possível, ex.:
+> *"❌ Não consegui identificar a compra. A IA entendeu o texto mas não achou quantidade + preço. Tente: `20kg cebola 8000 reais`."*
 
-**a) Detecção de mídia no webhook Z-API:**
-- `image.imageUrl` → foto (já existe, expandir para multi-item)
-- `document.documentUrl` + mime `application/pdf` → PDF
-- `document` com mime de imagem → tratar como foto
+### 2. (Opcional) Suavizar prompt
+Hoje o prompt diz *"So extraia se TODOS os itens tiverem produto + quantidade + valor"*. Deixar um pouco mais permissivo: aceitar quando der pra inferir o valor a partir de unitário × quantidade.
 
-**b) Download e envio ao Gemini:**
-- Imagem: já funciona (base64 inline `image_url`)
-- PDF: baixar, enviar como base64 com `mime_type: application/pdf` no Gemini 2.5 Pro (suporta PDF nativo até ~50 páginas). Modelo: `google/gemini-2.5-pro` (Pro, não Flash, pra OCR de nota).
+## Arquivos afetados
 
-**c) Tool call `register_purchase_batch`** — substitui o single-item no fluxo de mídia:
-```json
-{
-  "fornecedor": { "nome": "...", "cnpj": "..." },
-  "itens": [
-    { "produto": "Tomate", "quantidade": 5, "unidade": "kg", "valor_total": 25.00 },
-    ...
-  ]
-}
-```
-Sistema: "Extraia TODOS os itens visíveis. Se for nota fiscal, leia razão social e CNPJ do emitente."
+- `supabase/functions/webhook-zapi-purchase/index.ts` (mudanças nas funções `parseTextWithAI`, `parseMediaWithAI` e na resposta de erro do handler)
 
-**d) Resolução de fornecedor (com aliases):**
-1. Match por CNPJ exato em `suppliers.cnpj` → vincula
-2. Match por `supplier_aliases.alias` (normalizado) → vincula
-3. Match fuzzy em `suppliers.name` (score ≥ 0.7) → vincula
-4. Senão → status `awaiting_supplier_alias`, pergunta:
-   > "Identifiquei fornecedor *Distrib. ABC LTDA* (CNPJ 12.345…). Não está cadastrado com esse nome. A qual fornecedor da lista corresponde? \n1 - Hortifruti X\n2 - Atacadão Y\n…\n*N* - Cadastrar como novo"
-   - Se escolher existente → grava em `supplier_aliases` (nome+CNPJ). Próxima nota desse CNPJ vincula sozinha.
-   - Se "N" → cria novo `supplier`.
+## Fora do escopo
 
-**e) Resolução de produtos (item por item, antes do lote):**
-- Para cada item extraído, roda matching atual (`scoreProduct`).
-- Se score ≥ 0.7 e único → marca `product_id` direto.
-- Se score < 0.7 → marca `needs_creation=true` com `suggested_unit` da nota.
-- Após resolver fornecedor, **percorre itens com `needs_creation`** um a um:
-  > "Item 3/7: *Queijo mussarela 2kg R$ 89,90* — não está cadastrado. Quer cadastrar?\n1 - Sim (categoria: Laticínios, unid: kg)\n2 - Vincular a produto existente (responda nome)\n3 - Pular este item"
-  - Categoria sugerida: pede ao Gemini classificar nome do produto contra `product_categories` existentes.
-- Itens com múltiplos matches ambíguos → mesma lógica do fluxo atual (lista numerada).
+- Não vou mexer em banco — schema e RLS já estão OK.
+- Não vou mexer no fluxo de confirmação em lote (já funciona).
 
-**f) Confirmação em lote final:**
-```
-🧾 *Nota de Distrib. ABC* — 7 itens, R$ 432,50
+## Resultado esperado
 
-1. Tomate 5kg — R$ 25,00 ✅
-2. Cebola 3kg — R$ 18,00 ✅
-3. Queijo musc. 2kg — R$ 89,90 🆕 (será cadastrado)
-4. Óleo soja 12un — R$ 76,80 ✅
-…
-
-*1* - Confirmar tudo | *2* - Cancelar | *r N* - remover item N
-```
-- `r 3` remove item 3 e re-renderiza.
-- `1` → cria produtos novos pendentes, insere N linhas em `purchase_history`, dispara triggers de estoque (já existem), apaga pending.
-
-### 3. Arquivos afetados
-
-- `supabase/functions/webhook-zapi-purchase/index.ts` — refactor grande
-- Migration: criar `supplier_aliases`, alterar `pending_whatsapp_purchases`
-- `src/pages/Fornecedores.tsx` — pequena seção mostrando apelidos aprendidos (opcional, não bloqueia)
-- Memory: atualizar `mem://features/integracao-whatsapp-zapi` e `mem://logica/parsing-ia-compras`
-
-## Detalhes técnicos
-
-- **Modelo IA**: `google/gemini-2.5-pro` para mídia (melhor OCR), mantém `gemini-2.5-flash` para texto puro.
-- **PDF**: enviado inline base64 ao Gemini Pro — sem libs externas, sem `pdf-parse`.
-- **Limite Z-API**: URLs de mídia expiram; baixar imediatamente no recebimento.
-- **Idempotência**: hash do `messageId` Z-API para não processar duas vezes a mesma foto.
-- **Timeout**: parsing de PDF pode levar 30-60s; resposta inicial "🔍 Analisando nota, aguarde…" antes de chamar Gemini.
-
-## Fora do escopo (não faz agora)
-
-- Áudio/voz
-- Edição de quantidade/valor de item individual via WhatsApp (só remover/confirmar)
-- UI web pra revisar pendentes antes de confirmar (continua tudo no chat)
-
-## Riscos
-
-- Notas com baixa qualidade de foto: o Gemini pode errar valores. Mitigação: tela de confirmação em lote já obriga revisão humana.
-- PDFs grandes (>50 páginas) cortados pelo modelo. Mitigação: avisar usuário se nota tiver mais de 50 itens.
+Depois disso, mensagens como `20kg cebola 8000 reais`, `bife 10kg 8000 reais` e `oleo 24 unidades a 9000 reais` devem ser parseadas corretamente. Quando ainda assim falhar, os logs vão mostrar exatamente o que o Gemini respondeu para podermos ajustar o prompt.
