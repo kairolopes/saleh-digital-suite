@@ -217,26 +217,40 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
           },
         },
       }],
-      tool_choice: "auto",
+      tool_choice: { type: "function", function: { name: "register_purchase_batch" } },
     }),
   });
   if (!resp.ok) { console.error("AI text error", resp.status, await resp.text()); return null; }
   const data = await resp.json();
   const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!tc) return null;
+  if (!tc) {
+    console.warn("AI text: no tool_call. Raw message:", JSON.stringify(data.choices?.[0]?.message)?.substring(0, 500));
+    return null;
+  }
   try {
     const raw = JSON.parse(tc.function.arguments);
-    const itens: ParsedItem[] = (raw.itens || [])
-      .filter((i: any) => i.produto && i.quantidade > 0 && i.valor_total > 0)
-      .map((i: any) => ({
+    console.log("AI text parsed args:", JSON.stringify(raw).substring(0, 500));
+    const itens: ParsedItem[] = [];
+    for (const i of (raw.itens || [])) {
+      const qty = Number(i.quantidade);
+      let total = Number(i.valor_total);
+      if ((!total || total <= 0) && i.valor_unitario && qty > 0) {
+        total = Number(i.valor_unitario) * qty;
+      }
+      if (!i.produto || !(qty > 0) || !(total > 0)) {
+        console.warn("Item descartado pelo filtro:", JSON.stringify(i));
+        continue;
+      }
+      itens.push({
         produto: String(i.produto).trim(),
-        quantidade: Number(i.quantidade),
+        quantidade: qty,
         unidade: String(i.unidade || "un"),
-        valor_total: Number(i.valor_total),
-      }));
+        valor_total: total,
+      });
+    }
     if (itens.length === 0) return null;
     return { itens, fornecedor_nome: raw.fornecedor_nome ?? null, fornecedor_cnpj: null };
-  } catch { return null; }
+  } catch (e) { console.error("parse text tool failed", e); return null; }
 }
 
 function getSupabase() {
