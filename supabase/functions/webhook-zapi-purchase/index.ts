@@ -180,11 +180,18 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
         {
           role: "system",
           content: `Voce extrai compras de insumos a partir de mensagens em portugues. Pode haver UM OU MAIS itens.
-- Aceite qualquer ordem. Virgula = decimal.
-- Abreviacoes: cx caixa, fd fardo, pct pacote, un unidade, lt litro, dz duzia, sc saco, gl galao, bd balde, lta lata, gf garrafa.
-- Se vier preco unitario ("a 2,50 o kg"), multiplique pela quantidade para obter valor_total.
+- Aceite qualquer ordem das palavras. Virgula = decimal.
+- Abreviacoes: cx caixa, fd fardo, pct pacote, un unidade, lt litro, dz duzia, sc saco, gl galao, bd balde, lta lata, gf garrafa, kg quilo, g grama.
+- "X reais" / "R$ X" / "a X" = valor_total da compra inteira (nao unitario), salvo se disser "cada", "a unidade", "o kg".
+- Se vier preco unitario explicito ("a 2,50 o kg", "cada um custa 5"), use valor_unitario e nao valor_total.
+- Aceite QUALQUER valor numerico, mesmo que pareca alto (ex: 8000 reais por 20kg).
 - Fornecedor opcional, mencionado por "no/na/do/comprei do".
-- So extraia se TODOS os itens tiverem produto + quantidade + valor.`,
+- SEMPRE chame a tool register_purchase_batch, mesmo com 1 item. Se faltar info, chame mesmo assim com o que conseguir.
+- Exemplos:
+  "20kg cebola 8000 reais" -> {produto:"cebola", quantidade:20, unidade:"kg", valor_total:8000}
+  "bife 10kg 8000 reais" -> {produto:"bife", quantidade:10, unidade:"kg", valor_total:8000}
+  "oleo 24 unidades a 9000 reais" -> {produto:"oleo", quantidade:24, unidade:"un", valor_total:9000}
+  "5kg arroz a 6 o kg" -> {produto:"arroz", quantidade:5, unidade:"kg", valor_unitario:6}`,
         },
         { role: "user", content: messageText },
       ],
@@ -205,9 +212,10 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
                     produto: { type: "string" },
                     quantidade: { type: "number" },
                     unidade: { type: "string" },
-                    valor_total: { type: "number" },
+                    valor_total: { type: ["number", "null"] },
+                    valor_unitario: { type: ["number", "null"] },
                   },
-                  required: ["produto", "quantidade", "unidade", "valor_total"],
+                  required: ["produto", "quantidade", "unidade"],
                   additionalProperties: false,
                 },
               },
