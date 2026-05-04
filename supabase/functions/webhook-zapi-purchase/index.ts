@@ -148,17 +148,31 @@ REGRAS:
   if (!resp.ok) { console.error("AI media error", resp.status, await resp.text()); return null; }
   const data = await resp.json();
   const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!tc) return null;
+  if (!tc) {
+    console.warn("AI media: no tool_call. Raw:", JSON.stringify(data.choices?.[0]?.message)?.substring(0, 500));
+    return null;
+  }
   try {
     const raw = JSON.parse(tc.function.arguments);
-    const itens: ParsedItem[] = (raw.itens || [])
-      .filter((i: any) => i.produto && i.quantidade > 0 && i.valor_total > 0)
-      .map((i: any) => ({
+    console.log("AI media parsed args:", JSON.stringify(raw).substring(0, 500));
+    const itens: ParsedItem[] = [];
+    for (const i of (raw.itens || [])) {
+      const qty = Number(i.quantidade);
+      let total = Number(i.valor_total);
+      if ((!total || total <= 0) && i.valor_unitario && qty > 0) {
+        total = Number(i.valor_unitario) * qty;
+      }
+      if (!i.produto || !(qty > 0) || !(total > 0)) {
+        console.warn("Item midia descartado:", JSON.stringify(i));
+        continue;
+      }
+      itens.push({
         produto: String(i.produto).trim(),
-        quantidade: Number(i.quantidade),
+        quantidade: qty,
         unidade: String(i.unidade || "un"),
-        valor_total: Number(i.valor_total),
-      }));
+        valor_total: total,
+      });
+    }
     if (itens.length === 0) return null;
     return {
       itens,
