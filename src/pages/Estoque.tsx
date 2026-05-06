@@ -186,8 +186,21 @@ export default function Estoque() {
       toast({ title: 'Produto criado com sucesso!' });
       resetForm();
     },
-    onError: (error) => {
-      toast({ title: 'Erro ao criar produto', description: error.message, variant: 'destructive' });
+    onError: (error: any) => {
+      console.error('Erro ao criar produto:', error);
+      const msg = error?.message || '';
+      const isRls = error?.code === '42501' || /row-level security/i.test(msg);
+      const isDup = error?.code === '23505' || /duplicate key/i.test(msg);
+      toast({
+        title: 'Erro ao criar produto',
+        description: isRls
+          ? 'Você não tem permissão para cadastrar produtos. Faça login com uma conta admin ou estoque.'
+          : isDup
+          ? 'Já existe um produto com esse nome.'
+          : msg || 'Erro desconhecido. Veja o console para detalhes.',
+        variant: 'destructive',
+        duration: 8000,
+      });
     },
   });
 
@@ -206,8 +219,18 @@ export default function Estoque() {
       toast({ title: 'Produto atualizado com sucesso!' });
       resetForm();
     },
-    onError: (error) => {
-      toast({ title: 'Erro ao atualizar produto', description: error.message, variant: 'destructive' });
+    onError: (error: any) => {
+      console.error('Erro ao atualizar produto:', error);
+      const msg = error?.message || '';
+      const isRls = error?.code === '42501' || /row-level security/i.test(msg);
+      toast({
+        title: 'Erro ao atualizar produto',
+        description: isRls
+          ? 'Você não tem permissão para editar produtos. Faça login com uma conta admin ou estoque.'
+          : msg || 'Erro desconhecido. Veja o console para detalhes.',
+        variant: 'destructive',
+        duration: 8000,
+      });
     },
   });
 
@@ -284,8 +307,10 @@ export default function Estoque() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Tentando salvar produto:', formData);
     const validation = productSchema.safeParse(formData);
     if (!validation.success) {
+      console.warn('Validação falhou:', validation.error.errors);
       toast({ title: 'Erro de validação', description: validation.error.errors[0].message, variant: 'destructive' });
       return;
     }

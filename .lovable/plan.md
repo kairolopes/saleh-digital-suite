@@ -1,47 +1,48 @@
 ## Diagnóstico
 
-Olhei os logs da função `webhook-zapi-purchase` no momento em que você mandou `20kg cebola 8000 reais`, `bife 10kg 8000 reais` e `oleo 24 unidades a 9000 reais`. Em **todas** essas tentativas o webhook recebeu a mensagem e respondeu em ~1s — porém **sem o log "Parsed batch"**, e o usuário viu *"Não consegui identificar dados de compra"*. Isso significa que `parseTextWithAI` retornou `null`. Em apenas uma tentativa posterior o parse funcionou.
+Olhei o fluxo de cadastro de produto em `src/pages/Estoque.tsx` e o estado do banco:
 
-### Causas prováveis
+- O banco tem **237 produtos (235 ativos)** — então cadastros normalmente funcionam.
+- Não existe nenhum produto cujo nome contenha "salsa" no banco — o INSERT realmente não foi gravado.
+- Nas requisições de rede da sessão atual, os GETs em `/products` voltam `[]` mesmo com 235 ativos no banco. Isso é sintoma clássico de **RLS bloqueando** porque o request está saindo apenas com a anon key (usuário não autenticado, ou sessão expirada).
+- A política de INSERT em `products` exige `has_role(admin) OR has_role(estoque)`. Se o usuário que tentou cadastrar a "salsa" não tem nenhuma dessas roles (ou o token expirou), o insert é silenciosamente rejeitado pelo RLS — e o `onError` mostra a mensagem do Postgres, mas só por ~3s no toast.
 
-1. **`tool_choice: "auto"` no parser de texto** (linha 220) — deixa o Gemini decidir se chama a tool. Quando o preço soa "absurdo" (8000 reais por 20kg de cebola), o modelo às vezes responde em texto livre em vez de chamar `register_purchase_batch`. No parser de mídia já usamos `tool_choice: required` — texto deveria fazer o mesmo.
+Causa mais provável: **sessão sem role admin/estoque** (ou token expirado) → RLS rejeita o INSERT. Outras hipóteses menores: validação Zod silenciosa, ou clique sem preencher unidade.
 
-2. **Filtro silencioso muito agressivo** (linha 230): `i.quantidade > 0 && i.valor_total > 0` descarta itens sem dizer por quê. Se o modelo chamou a tool mas mandou um campo errado (ex: `valor_unitario` em vez de `valor_total`), o array fica vazio e cai em "não identificado".
+### Pontos frágeis no código que pioram o diagnóstico
 
-3. **Falta de log de diagnóstico**: hoje só logamos quando o parse dá certo. Quando falha, não dá pra saber se foi a IA que não chamou tool, se foi filtro, ou erro de JSON.
+1. `handleSubmit` chama `productSchema.safeParse` mas **não valida `category_id`** corretamente quando vem `null` (Zod aceita, mas vale conferir).
+2. O `onError` do `createMutation` só mostra `error.message` num toast curto. Se a mensagem for genérica ("new row violates row-level security policy"), o usuário não entende.
+3. Não existe nenhum `console.error` — quando o toast some, perde-se o rastro.
 
-4. **Mensagem de erro pouco útil**: o usuário não sabe se o problema é o formato, a IA, ou bug. Hoje só recebe a lista de exemplos.
+## Mudanças propostas
 
-## Mudanças
+### 1. `src/pages/Estoque.tsx` — melhorar feedback de erro do cadastro
 
-### 1. `supabase/functions/webhook-zapi-purchase/index.ts`
+- No `createMutation.onError` e `updateMutation.onError`:
+  - Adicionar `console.error("Erro produto:", error)` para deixar rastro no console.
+  - Detectar erro de RLS (`error.code === '42501'` ou mensagem contendo `row-level security`) e mostrar mensagem amigável: *"Você não tem permissão para cadastrar produtos. Faça login com uma conta admin ou estoque."*
+  - Detectar erro de duplicidade/constraint e dar mensagem clara.
+  - Manter o toast aberto mais tempo (`duration: 8000`) quando for erro.
 
-**Em `parseTextWithAI`:**
-- Trocar `tool_choice: "auto"` → `tool_choice: { type: "function", function: { name: "register_purchase_batch" } }` (forçar chamada da tool, igual ao parser de mídia).
-- Adicionar logs:
-  - `console.log("AI text raw response:", JSON.stringify(data.choices?.[0]?.message))` quando não vier `tool_calls`.
-  - `console.log("AI text parsed args:", raw)` antes do filtro.
-  - `console.warn("Item descartado pelo filtro:", i)` para cada item filtrado.
-- Aceitar `valor_unitario` como fallback: se `valor_total` ausente mas `valor_unitario` e `quantidade` > 0 → calcular total.
-- Reforçar prompt do sistema com exemplo: `"20kg cebola 8000 reais"` → `quantidade=20, unidade=kg, valor_total=8000`. Deixar claro que valores grandes são válidos.
+- No `handleSubmit`: logar `console.log("Tentando salvar produto:", formData)` antes de chamar a mutation, para confirmar nos logs que o submit disparou.
 
-**Em `parseMediaWithAI`:** aplicar a mesma melhoria de fallback `valor_unitario` e logs.
+### 2. Verificar a role do usuário que tentou cadastrar
 
-**Mensagem de erro mais útil** (linha 700): incluir um motivo quando possível, ex.:
-> *"❌ Não consegui identificar a compra. A IA entendeu o texto mas não achou quantidade + preço. Tente: `20kg cebola 8000 reais`."*
-
-### 2. (Opcional) Suavizar prompt
-Hoje o prompt diz *"So extraia se TODOS os itens tiverem produto + quantidade + valor"*. Deixar um pouco mais permissivo: aceitar quando der pra inferir o valor a partir de unitário × quantidade.
-
-## Arquivos afetados
-
-- `supabase/functions/webhook-zapi-purchase/index.ts` (mudanças nas funções `parseTextWithAI`, `parseMediaWithAI` e na resposta de erro do handler)
+Como parte da resposta, vou pedir para você confirmar **qual usuário tentou cadastrar a salsa** — preciso disso para checar no banco se ele tem a role `admin` ou `estoque` em `user_roles`. Se não tiver, o fix real é atribuir a role, não mexer no código.
 
 ## Fora do escopo
 
-- Não vou mexer em banco — schema e RLS já estão OK.
-- Não vou mexer no fluxo de confirmação em lote (já funciona).
+- Não vou mexer em RLS nem em schema. As políticas atuais estão corretas.
+- Não vou mexer no fluxo do WhatsApp.
 
 ## Resultado esperado
 
-Depois disso, mensagens como `20kg cebola 8000 reais`, `bife 10kg 8000 reais` e `oleo 24 unidades a 9000 reais` devem ser parseadas corretamente. Quando ainda assim falhar, os logs vão mostrar exatamente o que o Gemini respondeu para podermos ajustar o prompt.
+Depois disso:
+- Se o problema for permissão, o usuário vai ver claramente *"Você não tem permissão…"* em vez de uma mensagem técnica curta.
+- Os logs do console vão mostrar exatamente o erro retornado pelo Supabase, facilitando diagnósticos futuros.
+- Saberemos se precisamos atribuir role ao usuário ou se há outro bug.
+
+## Pergunta antes de implementar
+
+Qual e-mail/usuário tentou cadastrar a salsa? Assim eu confirmo no banco se ele tem role `admin` ou `estoque` antes de seguir.
