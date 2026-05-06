@@ -219,8 +219,18 @@ export default function Estoque() {
       toast({ title: 'Produto atualizado com sucesso!' });
       resetForm();
     },
-    onError: (error) => {
-      toast({ title: 'Erro ao atualizar produto', description: error.message, variant: 'destructive' });
+    onError: (error: any) => {
+      console.error('Erro ao atualizar produto:', error);
+      const msg = error?.message || '';
+      const isRls = error?.code === '42501' || /row-level security/i.test(msg);
+      toast({
+        title: 'Erro ao atualizar produto',
+        description: isRls
+          ? 'Você não tem permissão para editar produtos. Faça login com uma conta admin ou estoque.'
+          : msg || 'Erro desconhecido. Veja o console para detalhes.',
+        variant: 'destructive',
+        duration: 8000,
+      });
     },
   });
 
