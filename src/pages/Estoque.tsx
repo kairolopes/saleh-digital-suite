@@ -186,8 +186,21 @@ export default function Estoque() {
       toast({ title: 'Produto criado com sucesso!' });
       resetForm();
     },
-    onError: (error) => {
-      toast({ title: 'Erro ao criar produto', description: error.message, variant: 'destructive' });
+    onError: (error: any) => {
+      console.error('Erro ao criar produto:', error);
+      const msg = error?.message || '';
+      const isRls = error?.code === '42501' || /row-level security/i.test(msg);
+      const isDup = error?.code === '23505' || /duplicate key/i.test(msg);
+      toast({
+        title: 'Erro ao criar produto',
+        description: isRls
+          ? 'Você não tem permissão para cadastrar produtos. Faça login com uma conta admin ou estoque.'
+          : isDup
+          ? 'Já existe um produto com esse nome.'
+          : msg || 'Erro desconhecido. Veja o console para detalhes.',
+        variant: 'destructive',
+        duration: 8000,
+      });
     },
   });
 
