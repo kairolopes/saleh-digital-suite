@@ -307,8 +307,10 @@ export default function Estoque() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Tentando salvar produto:', formData);
     const validation = productSchema.safeParse(formData);
     if (!validation.success) {
+      console.warn('Validação falhou:', validation.error.errors);
       toast({ title: 'Erro de validação', description: validation.error.errors[0].message, variant: 'destructive' });
       return;
     }
