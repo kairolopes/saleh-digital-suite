@@ -1,48 +1,54 @@
 ## Diagnóstico
 
-Olhei o fluxo de cadastro de produto em `src/pages/Estoque.tsx` e o estado do banco:
+No fluxo do WhatsApp (`webhook-zapi-purchase/index.ts`), quando o bot pergunta "Esse produto não está cadastrado. O que fazer?" e o usuário responde **1 (Cadastrar)**, o sistema entra em loop e fica reenviando o mesmo prompt — dá a impressão de "erro ao cadastrar".
 
-- O banco tem **237 produtos (235 ativos)** — então cadastros normalmente funcionam.
-- Não existe nenhum produto cujo nome contenha "salsa" no banco — o INSERT realmente não foi gravado.
-- Nas requisições de rede da sessão atual, os GETs em `/products` voltam `[]` mesmo com 235 ativos no banco. Isso é sintoma clássico de **RLS bloqueando** porque o request está saindo apenas com a anon key (usuário não autenticado, ou sessão expirada).
-- A política de INSERT em `products` exige `has_role(admin) OR has_role(estoque)`. Se o usuário que tentou cadastrar a "salsa" não tem nenhuma dessas roles (ou o token expirou), o insert é silenciosamente rejeitado pelo RLS — e o `onError` mostra a mensagem do Postgres, mas só por ~3s no toast.
+### Causa raiz
 
-Causa mais provável: **sessão sem role admin/estoque** (ou token expirado) → RLS rejeita o INSERT. Outras hipóteses menores: validação Zod silenciosa, ou clique sem preencher unidade.
+No handler `awaiting_new_product_confirm` (linhas 630-638), quando o usuário responde "1":
 
-### Pontos frágeis no código que pioram o diagnóstico
+```ts
+it.needs_creation = true;
+it.product_name = it.produto;
+// salva e chama advanceFlow
+```
 
-1. `handleSubmit` chama `productSchema.safeParse` mas **não valida `category_id`** corretamente quando vem `null` (Zod aceita, mas vale conferir).
-2. O `onError` do `createMutation` só mostra `error.message` num toast curto. Se a mensagem for genérica ("new row violates row-level security policy"), o usuário não entende.
-3. Não existe nenhum `console.error` — quando o toast some, perde-se o rastro.
+Em seguida, `advanceFlow` chama `sendNextNewProductPrompt`, que procura o próximo item com este filtro (linha 372):
 
-## Mudanças propostas
+```ts
+items.findIndex(i => !i.excluded && i.needs_creation && !i.product_id);
+```
 
-### 1. `src/pages/Estoque.tsx` — melhorar feedback de erro do cadastro
+O item recém-confirmado continua com `needs_creation = true` e `product_id = null` → **o mesmo item é encontrado de novo** e o prompt é reenviado infinitamente. O produto nunca é cadastrado de fato porque o commit só acontece em `awaiting_batch_confirm`, etapa que nunca é alcançada.
 
-- No `createMutation.onError` e `updateMutation.onError`:
-  - Adicionar `console.error("Erro produto:", error)` para deixar rastro no console.
-  - Detectar erro de RLS (`error.code === '42501'` ou mensagem contendo `row-level security`) e mostrar mensagem amigável: *"Você não tem permissão para cadastrar produtos. Faça login com uma conta admin ou estoque."*
-  - Detectar erro de duplicidade/constraint e dar mensagem clara.
-  - Manter o toast aberto mais tempo (`duration: 8000`) quando for erro.
+O `product_name` é setado mas o filtro não olha para isso, então não resolve.
 
-- No `handleSubmit`: logar `console.log("Tentando salvar produto:", formData)` antes de chamar a mutation, para confirmar nos logs que o submit disparou.
+## Correção
 
-### 2. Verificar a role do usuário que tentou cadastrar
+### `supabase/functions/webhook-zapi-purchase/index.ts`
 
-Como parte da resposta, vou pedir para você confirmar **qual usuário tentou cadastrar a salsa** — preciso disso para checar no banco se ele tem a role `admin` ou `estoque` em `user_roles`. Se não tiver, o fix real é atribuir a role, não mexer no código.
+**1.** No tipo `ResolvedItem`, adicionar flag `creation_confirmed?: boolean` para marcar itens que já foram confirmados pelo usuário para serem criados no commit.
+
+**2.** No handler de "1" em `awaiting_new_product_confirm` (linha 630), trocar a lógica para:
+```ts
+it.needs_creation = true;
+it.creation_confirmed = true;
+it.product_name = it.produto;
+```
+(remover o segundo update redundante).
+
+**3.** Em `sendNextNewProductPrompt` (linha 372), atualizar o filtro para ignorar itens já confirmados:
+```ts
+items.findIndex(i => !i.excluded && i.needs_creation && !i.product_id && !i.creation_confirmed);
+```
+
+**4.** Em `commitBatch` (linha 477), a condição de criação fica `if (!productId && it.needs_creation)` — continua válida, pois `creation_confirmed` implica `needs_creation`.
+
+### Resultado esperado
+
+- Usuário envia compra → bot pergunta sobre item novo → responde "1" → bot avança imediatamente para o próximo item novo (ou para a confirmação final do lote).
+- Ao confirmar o lote com "1", o produto "Grão de bico" é criado e a compra registrada.
 
 ## Fora do escopo
 
-- Não vou mexer em RLS nem em schema. As políticas atuais estão corretas.
-- Não vou mexer no fluxo do WhatsApp.
-
-## Resultado esperado
-
-Depois disso:
-- Se o problema for permissão, o usuário vai ver claramente *"Você não tem permissão…"* em vez de uma mensagem técnica curta.
-- Os logs do console vão mostrar exatamente o erro retornado pelo Supabase, facilitando diagnósticos futuros.
-- Saberemos se precisamos atribuir role ao usuário ou se há outro bug.
-
-## Pergunta antes de implementar
-
-Qual e-mail/usuário tentou cadastrar a salsa? Assim eu confirmo no banco se ele tem role `admin` ou `estoque` antes de seguir.
+- Não vou mexer no parser de IA, no fluxo de fornecedor, nem em RLS.
+- Não vou alterar o schema do banco — `creation_confirmed` é só um campo no JSON `items`.
