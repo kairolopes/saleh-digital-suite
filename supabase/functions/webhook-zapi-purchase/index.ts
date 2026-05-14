@@ -629,10 +629,9 @@ async function handlePending(
     const it = items[idx];
     if (!it) { await advanceFlow(supabase, phone, pending.id, pending); return; }
     if (lower === "1") {
-      // mantém needs_creation=true, será criado no commit
+      // Confirma criação no commit final; marca para não repetir o prompt
       it.needs_creation = true;
-      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
-      // marcar como resolvido para não repetir o prompt
+      it.creation_confirmed = true;
       it.product_name = it.produto;
       await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
       await advanceFlow(supabase, phone, pending.id, pending);
