@@ -370,7 +370,7 @@ function buildBatchPreview(items: ResolvedItem[], supplierName: string | null, d
 async function sendNextNewProductPrompt(
   supabase: ReturnType<typeof getSupabase>, phone: string, pendingId: string, items: ResolvedItem[]
 ): Promise<boolean> {
-  const idx = items.findIndex(i => !i.excluded && i.needs_creation && !i.product_id);
+  const idx = items.findIndex(i => !i.excluded && i.needs_creation && !i.product_id && !i.creation_confirmed);
   if (idx === -1) return false;
   const it = items[idx];
   // sugerir categoria pelo nome
