@@ -290,6 +290,7 @@ type ResolvedItem = {
   ambiguous_options?: { id: string; name: string }[];
   suggested_category_id?: string | null;
   excluded?: boolean;
+  creation_confirmed?: boolean;
 };
 
 async function resolveItems(supabase: ReturnType<typeof getSupabase>, items: ParsedItem[]): Promise<ResolvedItem[]> {
