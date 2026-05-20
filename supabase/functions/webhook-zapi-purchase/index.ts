@@ -425,11 +425,11 @@ async function advanceFlow(
       pending.supplier_id = r.supplier_id;
     } else {
       await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier_alias" }).eq("id", pendingId);
-      const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+      const { data: suppliers } = await supabase.from("suppliers").select("id, name, is_active").order("is_active", { ascending: false }).order("name");
       let msg = `🏪 *Fornecedor da nota:* ${pending.detected_supplier_name}`;
       if (pending.detected_supplier_cnpj) msg += ` (CNPJ ${pending.detected_supplier_cnpj})`;
       msg += `\n\nEsse nome não está cadastrado. A qual fornecedor corresponde?\n\n`;
-      (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}${s.is_active ? "" : " (inativo)"}\n`; });
       msg += `*N* - Cadastrar como novo fornecedor\n*P* - Sem fornecedor`;
       await sendWhatsApp(phone, msg);
       return;
@@ -438,10 +438,10 @@ async function advanceFlow(
   if (!pending.supplier_id && !pending.detected_supplier_name) {
     // no supplier at all — ask
     await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pendingId);
-    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+    const { data: suppliers } = await supabase.from("suppliers").select("id, name, is_active").order("is_active", { ascending: false }).order("name");
     let msg = `🏪 *Escolha o fornecedor:*\n`;
-    (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-    msg += `*P* - Sem fornecedor`;
+    (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}${s.is_active ? "" : " (inativo)"}\n`; });
+    msg += `*N* - Cadastrar novo fornecedor\n*P* - Sem fornecedor`;
     await sendWhatsApp(phone, msg);
     return;
   }
