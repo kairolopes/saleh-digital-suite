@@ -333,11 +333,7 @@ async function resolveSupplier(
     const aliasNorm = normalize(name);
     const { data: byAlias } = await supabase.from("supplier_aliases").select("supplier_id, suppliers(name)").eq("alias_normalized", aliasNorm).maybeSingle();
     if (byAlias) return { supplier_id: byAlias.supplier_id, supplier_name: (byAlias as any).suppliers?.name || null, needs_alias: false };
-    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true);
-    const scored = (suppliers || []).map(s => ({ ...s, score: scoreProduct(name, s.name) })).sort((a, b) => b.score - a.score);
-    if (scored.length && scored[0].score >= 0.8 && (scored.length === 1 || scored[0].score - scored[1].score >= 0.15)) {
-      return { supplier_id: scored[0].id, supplier_name: scored[0].name, needs_alias: false };
-    }
+    // Sem auto-vínculo por similaridade de nome — sempre pedir confirmação do usuário.
     return { supplier_id: null, supplier_name: null, needs_alias: true };
   }
   return { supplier_id: null, supplier_name: null, needs_alias: false };
