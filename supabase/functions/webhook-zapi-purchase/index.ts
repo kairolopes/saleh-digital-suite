@@ -539,8 +539,26 @@ async function handlePending(
     return;
   }
 
+  if (pending.status === "awaiting_new_supplier_name") {
+    const newName = text.trim();
+    if (newName.length < 2) { await sendWhatsApp(phone, "❌ Nome muito curto. Envie o nome do novo fornecedor."); return; }
+    const { data: newSup, error } = await supabase.from("suppliers").insert({
+      name: newName,
+      is_active: true,
+    }).select("id, name").single();
+    if (error || !newSup) {
+      await sendWhatsApp(phone, "❌ Erro ao cadastrar fornecedor. Tente outro nome.");
+      return;
+    }
+    pending.supplier_id = newSup.id;
+    await supabase.from("pending_whatsapp_purchases").update({ supplier_id: newSup.id, status: "awaiting_supplier" }).eq("id", pending.id);
+    await sendWhatsApp(phone, `✅ Fornecedor *${newSup.name}* cadastrado.`);
+    await advanceFlow(supabase, phone, pending.id, pending);
+    return;
+  }
+
   if (pending.status === "awaiting_supplier_alias" || pending.status === "awaiting_supplier") {
-    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+    const { data: suppliers } = await supabase.from("suppliers").select("id, name, is_active").order("is_active", { ascending: false }).order("name");
     const sList = suppliers || [];
     if (lower === "p") {
       // proceed without supplier
@@ -550,23 +568,28 @@ async function handlePending(
       await advanceFlow(supabase, phone, pending.id, pending);
       return;
     }
-    if (lower === "n" && pending.detected_supplier_name) {
-      const { data: newSup, error } = await supabase.from("suppliers").insert({
-        name: pending.detected_supplier_name,
-        cnpj: pending.detected_supplier_cnpj,
-        is_active: true,
-      }).select("id, name").single();
-      if (error || !newSup) {
-        await sendWhatsApp(phone, "❌ Erro ao cadastrar fornecedor. Escolha um da lista.");
-        return;
+    if (lower === "n") {
+      if (pending.detected_supplier_name) {
+        const { data: newSup, error } = await supabase.from("suppliers").insert({
+          name: pending.detected_supplier_name,
+          cnpj: pending.detected_supplier_cnpj,
+          is_active: true,
+        }).select("id, name").single();
+        if (error || !newSup) {
+          await sendWhatsApp(phone, "❌ Erro ao cadastrar fornecedor. Escolha um da lista.");
+          return;
+        }
+        pending.supplier_id = newSup.id;
+        await supabase.from("pending_whatsapp_purchases").update({ supplier_id: newSup.id }).eq("id", pending.id);
+        await advanceFlow(supabase, phone, pending.id, pending);
+      } else {
+        await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_new_supplier_name" }).eq("id", pending.id);
+        await sendWhatsApp(phone, "✍️ Envie o *nome* do novo fornecedor:");
       }
-      pending.supplier_id = newSup.id;
-      await supabase.from("pending_whatsapp_purchases").update({ supplier_id: newSup.id }).eq("id", pending.id);
-      await advanceFlow(supabase, phone, pending.id, pending);
       return;
     }
     const num = parseInt(text, 10);
-    let chosen: { id: string; name: string } | null = null;
+    let chosen: { id: string; name: string; is_active?: boolean } | null = null;
     if (!isNaN(num) && num >= 1 && num <= sList.length) chosen = sList[num - 1];
     else {
       const scored = sList.map(s => ({ ...s, score: scoreProduct(text, s.name) })).filter(s => s.score >= 0.5).sort((a, b) => b.score - a.score);
@@ -574,6 +597,10 @@ async function handlePending(
     }
     if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número da lista, *N* (novo) ou *P* (sem)."); return; }
     pending.supplier_id = chosen.id;
+    // Reativar fornecedor inativo escolhido
+    if (chosen.is_active === false) {
+      await supabase.from("suppliers").update({ is_active: true }).eq("id", chosen.id);
+    }
     // se veio de mídia com nome detectado, gravar alias
     if (pending.detected_supplier_name) {
       const aliasNorm = normalize(pending.detected_supplier_name);
