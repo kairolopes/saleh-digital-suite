@@ -1,54 +1,42 @@
-## Diagnóstico
+## Problema
 
-No fluxo do WhatsApp (`webhook-zapi-purchase/index.ts`), quando o bot pergunta "Esse produto não está cadastrado. O que fazer?" e o usuário responde **1 (Cadastrar)**, o sistema entra em loop e fica reenviando o mesmo prompt — dá a impressão de "erro ao cadastrar".
+No fluxo de compras por WhatsApp (`webhook-zapi-purchase`), o bot às vezes não mostra fornecedores que existem no sistema, ou ainda escolhe um fornecedor parecido sozinho sem perguntar.
 
-### Causa raiz
+### Causas identificadas
 
-No handler `awaiting_new_product_confirm` (linhas 630-638), quando o usuário responde "1":
+1. **Lista filtrada por `is_active = true`** (linhas 336, 432, 445, 547). Qualquer fornecedor desativado some da lista do WhatsApp, mesmo que apareça normalmente em outras telas do sistema. Como na regra do projeto fornecedores são desativados (não excluídos), isso esconde itens válidos.
 
-```ts
-it.needs_creation = true;
-it.product_name = it.produto;
-// salva e chama advanceFlow
-```
+2. **Auto-vínculo silencioso por similaridade de nome** (linha 338): se o nome detectado tem score ≥ 0.80 contra qualquer fornecedor ativo, o bot vincula sozinho sem perguntar. Resultado: o usuário nunca vê a lista e a nota fica amarrada a um fornecedor errado (ex.: "Hortifruti Central" casando com "Hortifruti Centro").
 
-Em seguida, `advanceFlow` chama `sendNextNewProductPrompt`, que procura o próximo item com este filtro (linha 372):
-
-```ts
-items.findIndex(i => !i.excluded && i.needs_creation && !i.product_id);
-```
-
-O item recém-confirmado continua com `needs_creation = true` e `product_id = null` → **o mesmo item é encontrado de novo** e o prompt é reenviado infinitamente. O produto nunca é cadastrado de fato porque o commit só acontece em `awaiting_batch_confirm`, etapa que nunca é alcançada.
-
-O `product_name` é setado mas o filtro não olha para isso, então não resolve.
+3. **Mensagem `awaiting_supplier` sem opção `N`** (linha 442-449): quando a IA não detecta nome de fornecedor na nota, o menu só oferece "P - Sem fornecedor", não permite cadastrar um novo direto pelo WhatsApp.
 
 ## Correção
 
-### `supabase/functions/webhook-zapi-purchase/index.ts`
+Editar apenas `supabase/functions/webhook-zapi-purchase/index.ts`:
 
-**1.** No tipo `ResolvedItem`, adicionar flag `creation_confirmed?: boolean` para marcar itens que já foram confirmados pelo usuário para serem criados no commit.
+### 1. Mostrar todos os fornecedores (ativos primeiro)
+Trocar os 4 `SELECT ... .eq("is_active", true).order("name")` por `.order("is_active", { ascending: false }).order("name")`, exibindo "(inativo)" ao lado do nome na listagem. Assim o usuário enxerga tudo que existe no cadastro.
 
-**2.** No handler de "1" em `awaiting_new_product_confirm` (linha 630), trocar a lógica para:
-```ts
-it.needs_creation = true;
-it.creation_confirmed = true;
-it.product_name = it.produto;
-```
-(remover o segundo update redundante).
+### 2. Nunca auto-vincular por similaridade de nome
+Em `resolveSupplier` (linhas 322-344):
+- Manter o match automático **apenas** por CNPJ exato (suppliers.cnpj ou supplier_aliases.cnpj).
+- Manter o match automático por alias normalizado salvo (porque foi confirmado pelo usuário antes).
+- **Remover** o bloco de score ≥ 0.80 que auto-aceita pelo nome — sempre devolver `needs_alias: true` quando só temos nome e não há alias salvo. Isso força o `advanceFlow` a mandar a lista para o usuário escolher.
 
-**3.** Em `sendNextNewProductPrompt` (linha 372), atualizar o filtro para ignorar itens já confirmados:
-```ts
-items.findIndex(i => !i.excluded && i.needs_creation && !i.product_id && !i.creation_confirmed);
-```
+### 3. Adicionar opção "N - Cadastrar novo fornecedor" no fluxo `awaiting_supplier`
+No bloco 442-449 e no handler `awaiting_supplier` (linhas 546+), aceitar `N` mesmo quando não há `detected_supplier_name`, perguntando em seguida o nome do novo fornecedor (novo status `awaiting_new_supplier_name`) e gravando via `suppliers.insert`. Depois segue o fluxo normal de itens.
 
-**4.** Em `commitBatch` (linha 477), a condição de criação fica `if (!productId && it.needs_creation)` — continua válida, pois `creation_confirmed` implica `needs_creation`.
+### 4. Ajuste no handler `awaiting_supplier_alias / awaiting_supplier`
+Atualizar o índice de seleção (`sList[idx]`) para refletir a nova ordenação (ativos + inativos juntos). Ao escolher um inativo, reativar automaticamente (`is_active = true`) para não bagunçar relatórios.
 
-### Resultado esperado
+## Resultado esperado
 
-- Usuário envia compra → bot pergunta sobre item novo → responde "1" → bot avança imediatamente para o próximo item novo (ou para a confirmação final do lote).
-- Ao confirmar o lote com "1", o produto "Grão de bico" é criado e a compra registrada.
+- Toda nota com fornecedor detectado por nome (sem CNPJ e sem alias salvo) **sempre** mostra a lista completa de fornecedores ao usuário.
+- Lista inclui fornecedores inativos marcados como "(inativo)".
+- Usuário pode digitar `N` em qualquer ponto para cadastrar um novo fornecedor direto pelo WhatsApp.
+- Após a primeira escolha, o alias fica salvo em `supplier_aliases` e a próxima nota do mesmo emitente é resolvida automaticamente — sem chutes por similaridade.
 
 ## Fora do escopo
 
-- Não vou mexer no parser de IA, no fluxo de fornecedor, nem em RLS.
-- Não vou alterar o schema do banco — `creation_confirmed` é só um campo no JSON `items`.
+- Não vou mexer no parser da IA, no fluxo de itens, em RLS, nem no schema.
+- Não vou alterar a tela `/fornecedores` no frontend.
