@@ -333,11 +333,7 @@ async function resolveSupplier(
     const aliasNorm = normalize(name);
     const { data: byAlias } = await supabase.from("supplier_aliases").select("supplier_id, suppliers(name)").eq("alias_normalized", aliasNorm).maybeSingle();
     if (byAlias) return { supplier_id: byAlias.supplier_id, supplier_name: (byAlias as any).suppliers?.name || null, needs_alias: false };
-    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true);
-    const scored = (suppliers || []).map(s => ({ ...s, score: scoreProduct(name, s.name) })).sort((a, b) => b.score - a.score);
-    if (scored.length && scored[0].score >= 0.8 && (scored.length === 1 || scored[0].score - scored[1].score >= 0.15)) {
-      return { supplier_id: scored[0].id, supplier_name: scored[0].name, needs_alias: false };
-    }
+    // Sem auto-vínculo por similaridade de nome — sempre pedir confirmação do usuário.
     return { supplier_id: null, supplier_name: null, needs_alias: true };
   }
   return { supplier_id: null, supplier_name: null, needs_alias: false };
@@ -429,11 +425,11 @@ async function advanceFlow(
       pending.supplier_id = r.supplier_id;
     } else {
       await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier_alias" }).eq("id", pendingId);
-      const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+      const { data: suppliers } = await supabase.from("suppliers").select("id, name, is_active").order("is_active", { ascending: false }).order("name");
       let msg = `🏪 *Fornecedor da nota:* ${pending.detected_supplier_name}`;
       if (pending.detected_supplier_cnpj) msg += ` (CNPJ ${pending.detected_supplier_cnpj})`;
       msg += `\n\nEsse nome não está cadastrado. A qual fornecedor corresponde?\n\n`;
-      (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}${s.is_active ? "" : " (inativo)"}\n`; });
       msg += `*N* - Cadastrar como novo fornecedor\n*P* - Sem fornecedor`;
       await sendWhatsApp(phone, msg);
       return;
@@ -442,10 +438,10 @@ async function advanceFlow(
   if (!pending.supplier_id && !pending.detected_supplier_name) {
     // no supplier at all — ask
     await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_supplier" }).eq("id", pendingId);
-    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+    const { data: suppliers } = await supabase.from("suppliers").select("id, name, is_active").order("is_active", { ascending: false }).order("name");
     let msg = `🏪 *Escolha o fornecedor:*\n`;
-    (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
-    msg += `*P* - Sem fornecedor`;
+    (suppliers || []).forEach((s, i) => { msg += `${i + 1} - ${s.name}${s.is_active ? "" : " (inativo)"}\n`; });
+    msg += `*N* - Cadastrar novo fornecedor\n*P* - Sem fornecedor`;
     await sendWhatsApp(phone, msg);
     return;
   }
@@ -543,8 +539,26 @@ async function handlePending(
     return;
   }
 
+  if (pending.status === "awaiting_new_supplier_name") {
+    const newName = text.trim();
+    if (newName.length < 2) { await sendWhatsApp(phone, "❌ Nome muito curto. Envie o nome do novo fornecedor."); return; }
+    const { data: newSup, error } = await supabase.from("suppliers").insert({
+      name: newName,
+      is_active: true,
+    }).select("id, name").single();
+    if (error || !newSup) {
+      await sendWhatsApp(phone, "❌ Erro ao cadastrar fornecedor. Tente outro nome.");
+      return;
+    }
+    pending.supplier_id = newSup.id;
+    await supabase.from("pending_whatsapp_purchases").update({ supplier_id: newSup.id, status: "awaiting_supplier" }).eq("id", pending.id);
+    await sendWhatsApp(phone, `✅ Fornecedor *${newSup.name}* cadastrado.`);
+    await advanceFlow(supabase, phone, pending.id, pending);
+    return;
+  }
+
   if (pending.status === "awaiting_supplier_alias" || pending.status === "awaiting_supplier") {
-    const { data: suppliers } = await supabase.from("suppliers").select("id, name").eq("is_active", true).order("name");
+    const { data: suppliers } = await supabase.from("suppliers").select("id, name, is_active").order("is_active", { ascending: false }).order("name");
     const sList = suppliers || [];
     if (lower === "p") {
       // proceed without supplier
@@ -554,23 +568,28 @@ async function handlePending(
       await advanceFlow(supabase, phone, pending.id, pending);
       return;
     }
-    if (lower === "n" && pending.detected_supplier_name) {
-      const { data: newSup, error } = await supabase.from("suppliers").insert({
-        name: pending.detected_supplier_name,
-        cnpj: pending.detected_supplier_cnpj,
-        is_active: true,
-      }).select("id, name").single();
-      if (error || !newSup) {
-        await sendWhatsApp(phone, "❌ Erro ao cadastrar fornecedor. Escolha um da lista.");
-        return;
+    if (lower === "n") {
+      if (pending.detected_supplier_name) {
+        const { data: newSup, error } = await supabase.from("suppliers").insert({
+          name: pending.detected_supplier_name,
+          cnpj: pending.detected_supplier_cnpj,
+          is_active: true,
+        }).select("id, name").single();
+        if (error || !newSup) {
+          await sendWhatsApp(phone, "❌ Erro ao cadastrar fornecedor. Escolha um da lista.");
+          return;
+        }
+        pending.supplier_id = newSup.id;
+        await supabase.from("pending_whatsapp_purchases").update({ supplier_id: newSup.id }).eq("id", pending.id);
+        await advanceFlow(supabase, phone, pending.id, pending);
+      } else {
+        await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_new_supplier_name" }).eq("id", pending.id);
+        await sendWhatsApp(phone, "✍️ Envie o *nome* do novo fornecedor:");
       }
-      pending.supplier_id = newSup.id;
-      await supabase.from("pending_whatsapp_purchases").update({ supplier_id: newSup.id }).eq("id", pending.id);
-      await advanceFlow(supabase, phone, pending.id, pending);
       return;
     }
     const num = parseInt(text, 10);
-    let chosen: { id: string; name: string } | null = null;
+    let chosen: { id: string; name: string; is_active?: boolean } | null = null;
     if (!isNaN(num) && num >= 1 && num <= sList.length) chosen = sList[num - 1];
     else {
       const scored = sList.map(s => ({ ...s, score: scoreProduct(text, s.name) })).filter(s => s.score >= 0.5).sort((a, b) => b.score - a.score);
@@ -578,6 +597,10 @@ async function handlePending(
     }
     if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número da lista, *N* (novo) ou *P* (sem)."); return; }
     pending.supplier_id = chosen.id;
+    // Reativar fornecedor inativo escolhido
+    if (chosen.is_active === false) {
+      await supabase.from("suppliers").update({ is_active: true }).eq("id", chosen.id);
+    }
     // se veio de mídia com nome detectado, gravar alias
     if (pending.detected_supplier_name) {
       const aliasNorm = normalize(pending.detected_supplier_name);
