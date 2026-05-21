@@ -41,12 +41,13 @@ export default function Compras() {
   });
 
   const { data: products } = useQuery({
-    queryKey: ['products'],
+    queryKey: ['products-purchase'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
         .select('*')
         .eq('is_active', true)
+        .order('is_visible_in_recipes', { ascending: false })
         .order('name');
       if (error) throw error;
       return data;
