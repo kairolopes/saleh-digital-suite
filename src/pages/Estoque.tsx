@@ -289,6 +289,20 @@ export default function Estoque() {
       toast({ title: 'Erro ao excluir produto', description: error.message, variant: 'destructive' });
     },
   });
+  const toggleVisibilityMutation = useMutation({
+    mutationFn: async ({ id, visible }: { id: string; visible: boolean }) => {
+      const { error } = await supabase.from('products').update({ is_visible_in_recipes: visible }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: (_d, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast({ title: vars.visible ? 'Produto liberado para fichas técnicas' : 'Produto oculto das fichas técnicas' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Erro ao alterar visibilidade', description: error.message, variant: 'destructive' });
+    },
+  });
+
 
   const resetForm = () => {
     setFormData({ name: '', unit: 'kg', min_quantity: 0, category_id: null });
