@@ -553,6 +553,33 @@ async function handlePending(
     return;
   }
 
+  if (pending.status === "awaiting_visibility_release") {
+    const active = items.filter(i => !i.excluded);
+    const hidden = active.filter(i => i.is_hidden && !i.release_decided);
+    if (lower === "s" || lower === "1" || lower === "sim") {
+      for (const h of hidden) {
+        if (h.product_id) {
+          await supabase.from("products").update({ is_visible_in_recipes: true }).eq("id", h.product_id);
+        }
+        h.release_decided = true;
+        h.is_hidden = false;
+      }
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      await sendWhatsApp(phone, `✅ ${hidden.length === 1 ? 'Produto liberado' : 'Produtos liberados'} para uso nas fichas técnicas.`);
+      await commitBatch(supabase, phone, pending);
+      return;
+    }
+    if (lower === "n" || lower === "2" || lower === "nao" || lower === "não") {
+      for (const h of hidden) { h.release_decided = true; }
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      await commitBatch(supabase, phone, pending);
+      return;
+    }
+    await sendWhatsApp(phone, "🔄 Responda *S* (liberar) ou *N* (manter oculto).");
+    return;
+  }
+
+
   if (pending.status === "awaiting_new_supplier_name") {
     const newName = text.trim();
     if (newName.length < 2) { await sendWhatsApp(phone, "❌ Nome muito curto. Envie o nome do novo fornecedor."); return; }
