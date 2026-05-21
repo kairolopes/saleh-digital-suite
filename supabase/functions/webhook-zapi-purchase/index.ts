@@ -472,9 +472,13 @@ async function commitBatch(
   }
   let inserted = 0;
   let failed = 0;
+  let skipped = 0;
   for (const it of items) {
     const productId = it.product_id;
-    if (!productId) { failed++; continue; }
+    if (!productId) {
+      if (it.needs_creation) skipped++; else failed++;
+      continue;
+    }
     const { error: insErr } = await supabase.from("purchase_history").insert({
       product_id: productId,
       quantity: it.quantidade,
@@ -487,8 +491,9 @@ async function commitBatch(
     else inserted++;
   }
   await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
-  const total = items.reduce((s, i) => s + i.valor_total, 0);
+  const total = items.filter(i => i.product_id).reduce((s, i) => s + i.valor_total, 0);
   let msg = `✅ *${inserted} compras registradas!*\n💰 Total: R$ ${fmtCurrency(total)}`;
+  if (skipped > 0) msg += `\n⚠️ ${skipped} item(ns) ignorado(s) por não estarem cadastrados no estoque. Cadastre pela plataforma e registre manualmente.`;
   if (failed > 0) msg += `\n⚠️ ${failed} item(ns) falharam.`;
   msg += `\n_Estoque atualizado automaticamente._`;
   await sendWhatsApp(phone, msg);
