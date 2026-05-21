@@ -518,6 +518,16 @@ async function handlePending(
   // remove command from batch confirm
   if (pending.status === "awaiting_batch_confirm") {
     if (lower === "1" || lower === "sim" || lower === "s") {
+      const active = items.filter(i => !i.excluded);
+      const hidden = active.filter(i => i.is_hidden && !i.release_decided);
+      if (hidden.length > 0) {
+        let msg = `⚠️ *Atenção:* ${hidden.length === 1 ? 'o produto abaixo existe' : 'os produtos abaixo existem'} no estoque mas ${hidden.length === 1 ? 'está oculto' : 'estão ocultos'} das fichas técnicas (não fazem parte de nenhuma receita):\n\n`;
+        hidden.forEach((h, i) => { msg += `${i + 1}. ${h.product_name || h.produto}\n`; });
+        msg += `\n*S* - Liberar ${hidden.length === 1 ? 'esse produto' : 'todos'} para uso nas fichas técnicas\n*N* - Manter ${hidden.length === 1 ? 'oculto' : 'todos ocultos'} e registrar a compra mesmo assim`;
+        await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_visibility_release", items: items as any }).eq("id", pending.id);
+        await sendWhatsApp(phone, msg);
+        return;
+      }
       await commitBatch(supabase, phone, pending);
       return;
     }
