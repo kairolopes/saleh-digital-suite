@@ -675,6 +675,16 @@ export default function Estoque() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <Select value={visibilityFilter} onValueChange={(v: 'all' | 'visible' | 'hidden') => { setVisibilityFilter(v); setCurrentPage(1); }}>
+                    <SelectTrigger className="w-full sm:w-[200px]">
+                      <SelectValue placeholder="Visibilidade" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos (visíveis + ocultos)</SelectItem>
+                      <SelectItem value="visible">Visíveis em fichas</SelectItem>
+                      <SelectItem value="hidden">Ocultos das fichas</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardHeader>
               <CardContent>
