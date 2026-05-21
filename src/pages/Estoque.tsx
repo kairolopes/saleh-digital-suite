@@ -48,6 +48,7 @@ type Product = {
   last_price: number | null;
   min_quantity: number | null;
   is_active: boolean;
+  is_visible_in_recipes: boolean;
   category_id: string | null;
 };
 
