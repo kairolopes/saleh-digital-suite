@@ -714,14 +714,14 @@ async function handlePending(
       return;
     }
     // tratar texto livre como busca
-    const { data: products } = await supabase.from("products").select("id, name, unit").eq("is_active", true);
+    const { data: products } = await supabase.from("products").select("id, name, unit, is_visible_in_recipes").eq("is_active", true);
     const scored = (products || []).map(p => ({ ...p, score: scoreProduct(text, p.name) })).filter(s => s.score >= 0.5).sort((a, b) => b.score - a.score);
     if (scored.length === 0) { await sendWhatsApp(phone, "❌ Não achei. Tente outro nome, ou responda *1* (cadastrar) ou *3* (pular)."); return; }
     if (scored.length > 1 && scored[0].score - scored[1].score < 0.15) {
       let msg = `🔍 Vários produtos parecidos:\n`;
-      scored.slice(0, 4).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      scored.slice(0, 4).forEach((s, i) => { msg += `${i + 1} - ${s.name}${s.is_visible_in_recipes === false ? " (oculto das fichas)" : ""}\n`; });
       msg += `\nResponda o número exato.`;
-      it.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name }));
+      it.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name, hidden: s.is_visible_in_recipes === false }));
       it.needs_creation = false;
       await supabase.from("pending_whatsapp_purchases").update({
         items: items as any, status: "awaiting_product_choice",
@@ -731,6 +731,7 @@ async function handlePending(
     }
     it.product_id = scored[0].id;
     it.product_name = scored[0].name;
+    it.is_hidden = scored[0].is_visible_in_recipes === false;
     it.needs_creation = false;
     await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
     await advanceFlow(supabase, phone, pending.id, pending);
