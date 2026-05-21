@@ -683,6 +683,7 @@ async function handlePending(
     if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número, *N* (novo) ou *P* (pular)."); return; }
     it.product_id = chosen.id;
     it.product_name = chosen.name;
+    it.is_hidden = (chosen as any).hidden === true;
     it.ambiguous_options = undefined;
     await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
     await advanceFlow(supabase, phone, pending.id, pending);
