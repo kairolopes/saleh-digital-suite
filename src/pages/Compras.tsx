@@ -204,7 +204,9 @@ export default function Compras() {
                     </SelectTrigger>
                     <SelectContent>
                       {products?.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.name} ({p.unit})</SelectItem>
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name} ({p.unit}){(p as any).is_visible_in_recipes === false ? ' — oculto das fichas' : ''}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
