@@ -405,7 +405,12 @@ export default function Estoque() {
       : selectedCategoryFilter === 'uncategorized' 
         ? !p.category_id 
         : p.category_id === selectedCategoryFilter;
-    return matchesSearch && matchesCategory;
+    const matchesVisibility = visibilityFilter === 'all'
+      ? true
+      : visibilityFilter === 'visible'
+        ? p.is_visible_in_recipes !== false
+        : p.is_visible_in_recipes === false;
+    return matchesSearch && matchesCategory && matchesVisibility;
   });
 
   const totalPages = Math.ceil((filteredProducts?.length || 0) / itemsPerPage);
