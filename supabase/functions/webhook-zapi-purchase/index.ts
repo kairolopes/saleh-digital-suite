@@ -655,12 +655,6 @@ async function handlePending(
       await advanceFlow(supabase, phone, pending.id, pending);
       return;
     }
-      it.needs_creation = true;
-      it.ambiguous_options = undefined;
-      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
-      await advanceFlow(supabase, phone, pending.id, pending);
-      return;
-    }
     const num = parseInt(text, 10);
     let chosen = null;
     if (!isNaN(num) && num >= 1 && num <= it.ambiguous_options.length) chosen = it.ambiguous_options[num - 1];
