@@ -107,14 +107,35 @@ export default function Compras() {
       }]);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_d, vars) => {
       queryClient.invalidateQueries({ queryKey: ['purchases'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['products-purchase'] });
       toast({ title: 'Compra registrada com sucesso!' });
+      const prod = products?.find(p => p.id === vars.product_id);
+      if (prod && (prod as any).is_visible_in_recipes === false) {
+        setReleasePrompt({ id: prod.id, name: prod.name });
+      }
       resetForm();
     },
     onError: (error) => {
       toast({ title: 'Erro ao registrar compra', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const releaseVisibilityMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('products').update({ is_visible_in_recipes: true }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products-purchase'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast({ title: 'Produto liberado para fichas técnicas' });
+      setReleasePrompt(null);
+    },
+    onError: (error: any) => {
+      toast({ title: 'Erro ao liberar produto', description: error.message, variant: 'destructive' });
     },
   });
 
