@@ -31,6 +31,7 @@ export default function Compras() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [releasePrompt, setReleasePrompt] = useState<{ id: string; name: string } | null>(null);
   const [formData, setFormData] = useState({
     product_id: '',
     supplier_id: '',
