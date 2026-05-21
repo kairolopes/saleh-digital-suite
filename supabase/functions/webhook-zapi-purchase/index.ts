@@ -675,15 +675,6 @@ async function handlePending(
   if (pending.status === "awaiting_new_product_confirm") {
     const it = items[idx];
     if (!it) { await advanceFlow(supabase, phone, pending.id, pending); return; }
-    if (lower === "1") {
-      // Confirma criação no commit final; marca para não repetir o prompt
-      it.needs_creation = true;
-      it.creation_confirmed = true;
-      it.product_name = it.produto;
-      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
-      await advanceFlow(supabase, phone, pending.id, pending);
-      return;
-    }
     if (lower === "3" || lower === "p") {
       it.excluded = true;
       await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
@@ -698,7 +689,7 @@ async function handlePending(
     // tratar texto livre como busca
     const { data: products } = await supabase.from("products").select("id, name, unit, is_visible_in_recipes").eq("is_active", true);
     const scored = (products || []).map(p => ({ ...p, score: scoreProduct(text, p.name) })).filter(s => s.score >= 0.5).sort((a, b) => b.score - a.score);
-    if (scored.length === 0) { await sendWhatsApp(phone, "❌ Não achei. Tente outro nome, ou responda *1* (cadastrar) ou *3* (pular)."); return; }
+    if (scored.length === 0) { await sendWhatsApp(phone, "❌ Não achei nenhum produto. Cadastre primeiro pela plataforma, ou responda *3* (pular este item)."); return; }
     if (scored.length > 1 && scored[0].score - scored[1].score < 0.15) {
       let msg = `🔍 Vários produtos parecidos:\n`;
       scored.slice(0, 4).forEach((s, i) => { msg += `${i + 1} - ${s.name}${s.is_visible_in_recipes === false ? " (oculto das fichas)" : ""}\n`; });
