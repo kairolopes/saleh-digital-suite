@@ -367,6 +367,23 @@ export default function Compras() {
             )}
           </CardContent>
         </Card>
+
+        <AlertDialog open={!!releasePrompt} onOpenChange={(open) => { if (!open) setReleasePrompt(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Liberar produto para fichas técnicas?</AlertDialogTitle>
+              <AlertDialogDescription>
+                O produto <strong>{releasePrompt?.name}</strong> está oculto das fichas técnicas (não faz parte de nenhuma receita). Deseja liberá-lo para poder usá-lo em fichas?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setReleasePrompt(null)}>Manter oculto</AlertDialogCancel>
+              <AlertDialogAction onClick={() => releasePrompt && releaseVisibilityMutation.mutate(releasePrompt.id)}>
+                Liberar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </AppLayout>
   );
