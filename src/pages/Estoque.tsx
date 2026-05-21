@@ -729,14 +729,29 @@ export default function Estoque() {
                                 <TableCell>{formatCurrency(product.average_price ?? 0)}/{product.unit}</TableCell>
                                 <TableCell>{formatCurrency(product.last_price ?? 0)}/{product.unit}</TableCell>
                                 <TableCell>
-                                  {(product.current_quantity ?? 0) <= (product.min_quantity ?? 0) ? (
-                                    <Badge variant="destructive">Baixo</Badge>
-                                  ) : (
-                                    <Badge className="bg-success">OK</Badge>
-                                  )}
+                                  <div className="flex flex-col gap-1">
+                                    {(product.current_quantity ?? 0) <= (product.min_quantity ?? 0) ? (
+                                      <Badge variant="destructive">Baixo</Badge>
+                                    ) : (
+                                      <Badge className="bg-success">OK</Badge>
+                                    )}
+                                    {product.is_visible_in_recipes === false && (
+                                      <Badge variant="outline" className="gap-1 font-normal text-xs">
+                                        <EyeOff className="h-3 w-3" /> Oculto
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </TableCell>
                                 <TableCell className="text-right">
                                   <div className="flex justify-end gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => toggleVisibilityMutation.mutate({ id: product.id, visible: !(product.is_visible_in_recipes !== false) })}
+                                      title={product.is_visible_in_recipes === false ? 'Liberar para fichas técnicas' : 'Ocultar das fichas técnicas'}
+                                    >
+                                      {product.is_visible_in_recipes === false ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                    </Button>
                                     <Button variant="ghost" size="icon" onClick={() => handleAdjustStock(product)} title="Ajustar estoque">
                                       <RefreshCw className="h-4 w-4" />
                                     </Button>
