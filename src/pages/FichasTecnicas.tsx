@@ -30,6 +30,7 @@ interface Product {
   name: string;
   unit: string;
   average_price: number;
+  is_visible_in_recipes?: boolean;
 }
 
 interface Recipe {
