@@ -662,7 +662,7 @@ async function handlePending(
       const sc = it.ambiguous_options.map(o => ({ ...o, score: scoreProduct(text, o.name) })).filter(o => o.score >= 0.5).sort((a, b) => b.score - a.score);
       if (sc.length === 1 || (sc.length > 1 && sc[0].score - sc[1].score >= 0.15)) chosen = sc[0];
     }
-    if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número, *N* (novo) ou *P* (pular)."); return; }
+    if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número ou *P* (pular). Novos produtos só podem ser cadastrados pela plataforma."); return; }
     it.product_id = chosen.id;
     it.product_name = chosen.name;
     it.is_hidden = (chosen as any).hidden === true;
