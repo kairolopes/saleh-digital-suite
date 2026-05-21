@@ -357,7 +357,7 @@ function buildBatchPreview(items: ResolvedItem[], supplierName: string | null, d
     if (i.excluded) {
       msg += `~${n}. ${i.produto}~ ❌ removido\n`;
     } else {
-      const tag = i.needs_creation ? "🆕 cadastrar" : (i.product_name ? "✅" : "❓");
+      const tag = i.needs_creation ? "⚠️ não cadastrado (será ignorado)" : (i.product_name ? "✅" : "❓");
       const hidden = i.is_hidden ? " 🙈 oculto" : "";
       const display = i.product_name || i.produto;
       msg += `${n}. ${display}${hidden} — ${i.quantidade} ${i.unidade} — R$ ${fmtCurrency(i.valor_total)} ${tag}\n`;
@@ -388,11 +388,10 @@ async function sendNextNewProductPrompt(
     items: items as any,
   }).eq("id", pendingId);
 
-  let msg = `🆕 Item ${idx + 1}/${items.length}: *${it.produto}*\n`;
+  let msg = `⚠️ Item ${idx + 1}/${items.length}: *${it.produto}*\n`;
   msg += `Quantidade: ${it.quantidade} ${it.unidade} — R$ ${fmtCurrency(it.valor_total)}\n\n`;
-  msg += `Esse produto não está cadastrado. O que fazer?\n\n`;
-  msg += `*1* - Cadastrar (categoria: ${suggestedCat?.name || "A definir"}, unid: ${it.unidade})\n`;
-  msg += `*2* - Vincular a outro produto (responda o nome)\n`;
+  msg += `Esse produto *não está cadastrado* no estoque. O cadastro de novos produtos só pode ser feito pela plataforma.\n\n`;
+  msg += `*2* - Vincular a um produto existente (responda o nome)\n`;
   msg += `*3* - Pular este item`;
   await sendWhatsApp(phone, msg);
   return true;
@@ -411,7 +410,7 @@ async function sendNextAmbiguousPrompt(
   }).eq("id", pendingId);
   let msg = `🔍 Item ${idx + 1}/${items.length}: "*${it.produto}*"\n\nMais de um produto parecido. Escolha:\n`;
   it.ambiguous_options!.forEach((o, i) => { msg += `${i + 1} - ${o.name}${o.hidden ? " (oculto das fichas)" : ""}\n`; });
-  msg += `*N* - Cadastrar como novo\n*P* - Pular este item`;
+  msg += `*P* - Pular este item (cadastro de novos produtos só pela plataforma)`;
   await sendWhatsApp(phone, msg);
   return true;
 }
@@ -473,19 +472,13 @@ async function commitBatch(
   }
   let inserted = 0;
   let failed = 0;
+  let skipped = 0;
   for (const it of items) {
-    let productId = it.product_id;
-    if (!productId && it.needs_creation) {
-      const { data: newProd, error: pErr } = await supabase.from("products").insert({
-        name: it.produto,
-        unit: it.unidade,
-        category_id: it.suggested_category_id || null,
-        is_active: true,
-      }).select("id").single();
-      if (pErr || !newProd) { console.error("create product failed", pErr); failed++; continue; }
-      productId = newProd.id;
+    const productId = it.product_id;
+    if (!productId) {
+      if (it.needs_creation) skipped++; else failed++;
+      continue;
     }
-    if (!productId) { failed++; continue; }
     const { error: insErr } = await supabase.from("purchase_history").insert({
       product_id: productId,
       quantity: it.quantidade,
@@ -498,8 +491,9 @@ async function commitBatch(
     else inserted++;
   }
   await supabase.from("pending_whatsapp_purchases").delete().eq("id", pending.id);
-  const total = items.reduce((s, i) => s + i.valor_total, 0);
+  const total = items.filter(i => i.product_id).reduce((s, i) => s + i.valor_total, 0);
   let msg = `✅ *${inserted} compras registradas!*\n💰 Total: R$ ${fmtCurrency(total)}`;
+  if (skipped > 0) msg += `\n⚠️ ${skipped} item(ns) ignorado(s) por não estarem cadastrados no estoque. Cadastre pela plataforma e registre manualmente.`;
   if (failed > 0) msg += `\n⚠️ ${failed} item(ns) falharam.`;
   msg += `\n_Estoque atualizado automaticamente._`;
   await sendWhatsApp(phone, msg);
@@ -666,13 +660,6 @@ async function handlePending(
       await advanceFlow(supabase, phone, pending.id, pending);
       return;
     }
-    if (lower === "n") {
-      it.needs_creation = true;
-      it.ambiguous_options = undefined;
-      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
-      await advanceFlow(supabase, phone, pending.id, pending);
-      return;
-    }
     const num = parseInt(text, 10);
     let chosen = null;
     if (!isNaN(num) && num >= 1 && num <= it.ambiguous_options.length) chosen = it.ambiguous_options[num - 1];
@@ -680,7 +667,7 @@ async function handlePending(
       const sc = it.ambiguous_options.map(o => ({ ...o, score: scoreProduct(text, o.name) })).filter(o => o.score >= 0.5).sort((a, b) => b.score - a.score);
       if (sc.length === 1 || (sc.length > 1 && sc[0].score - sc[1].score >= 0.15)) chosen = sc[0];
     }
-    if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número, *N* (novo) ou *P* (pular)."); return; }
+    if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número ou *P* (pular). Novos produtos só podem ser cadastrados pela plataforma."); return; }
     it.product_id = chosen.id;
     it.product_name = chosen.name;
     it.is_hidden = (chosen as any).hidden === true;
@@ -693,15 +680,6 @@ async function handlePending(
   if (pending.status === "awaiting_new_product_confirm") {
     const it = items[idx];
     if (!it) { await advanceFlow(supabase, phone, pending.id, pending); return; }
-    if (lower === "1") {
-      // Confirma criação no commit final; marca para não repetir o prompt
-      it.needs_creation = true;
-      it.creation_confirmed = true;
-      it.product_name = it.produto;
-      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
-      await advanceFlow(supabase, phone, pending.id, pending);
-      return;
-    }
     if (lower === "3" || lower === "p") {
       it.excluded = true;
       await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
@@ -716,7 +694,7 @@ async function handlePending(
     // tratar texto livre como busca
     const { data: products } = await supabase.from("products").select("id, name, unit, is_visible_in_recipes").eq("is_active", true);
     const scored = (products || []).map(p => ({ ...p, score: scoreProduct(text, p.name) })).filter(s => s.score >= 0.5).sort((a, b) => b.score - a.score);
-    if (scored.length === 0) { await sendWhatsApp(phone, "❌ Não achei. Tente outro nome, ou responda *1* (cadastrar) ou *3* (pular)."); return; }
+    if (scored.length === 0) { await sendWhatsApp(phone, "❌ Não achei nenhum produto. Cadastre primeiro pela plataforma, ou responda *3* (pular este item)."); return; }
     if (scored.length > 1 && scored[0].score - scored[1].score < 0.15) {
       let msg = `🔍 Vários produtos parecidos:\n`;
       scored.slice(0, 4).forEach((s, i) => { msg += `${i + 1} - ${s.name}${s.is_visible_in_recipes === false ? " (oculto das fichas)" : ""}\n`; });
