@@ -388,11 +388,10 @@ async function sendNextNewProductPrompt(
     items: items as any,
   }).eq("id", pendingId);
 
-  let msg = `🆕 Item ${idx + 1}/${items.length}: *${it.produto}*\n`;
+  let msg = `⚠️ Item ${idx + 1}/${items.length}: *${it.produto}*\n`;
   msg += `Quantidade: ${it.quantidade} ${it.unidade} — R$ ${fmtCurrency(it.valor_total)}\n\n`;
-  msg += `Esse produto não está cadastrado. O que fazer?\n\n`;
-  msg += `*1* - Cadastrar (categoria: ${suggestedCat?.name || "A definir"}, unid: ${it.unidade})\n`;
-  msg += `*2* - Vincular a outro produto (responda o nome)\n`;
+  msg += `Esse produto *não está cadastrado* no estoque. O cadastro de novos produtos só pode ser feito pela plataforma.\n\n`;
+  msg += `*2* - Vincular a um produto existente (responda o nome)\n`;
   msg += `*3* - Pular este item`;
   await sendWhatsApp(phone, msg);
   return true;
