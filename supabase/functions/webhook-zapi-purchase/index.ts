@@ -357,7 +357,7 @@ function buildBatchPreview(items: ResolvedItem[], supplierName: string | null, d
     if (i.excluded) {
       msg += `~${n}. ${i.produto}~ ❌ removido\n`;
     } else {
-      const tag = i.needs_creation ? "🆕 cadastrar" : (i.product_name ? "✅" : "❓");
+      const tag = i.needs_creation ? "⚠️ não cadastrado (será ignorado)" : (i.product_name ? "✅" : "❓");
       const hidden = i.is_hidden ? " 🙈 oculto" : "";
       const display = i.product_name || i.produto;
       msg += `${n}. ${display}${hidden} — ${i.quantidade} ${i.unidade} — R$ ${fmtCurrency(i.valor_total)} ${tag}\n`;
