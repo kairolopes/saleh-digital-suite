@@ -1,42 +1,41 @@
-## Problema
+## Objetivo
 
-No fluxo de compras por WhatsApp (`webhook-zapi-purchase`), o bot às vezes não mostra fornecedores que existem no sistema, ou ainda escolhe um fornecedor parecido sozinho sem perguntar.
+Esconder das fichas técnicas os produtos do estoque que não são usados em nenhuma receita. O usuário precisa "liberar" manualmente esses produtos para que voltem a aparecer no seletor de ingredientes. Se uma compra (manual ou via WhatsApp) cair em um produto oculto, o sistema deve avisar que ele existe mas está oculto, e oferecer liberar.
 
-### Causas identificadas
+## Mudanças
 
-1. **Lista filtrada por `is_active = true`** (linhas 336, 432, 445, 547). Qualquer fornecedor desativado some da lista do WhatsApp, mesmo que apareça normalmente em outras telas do sistema. Como na regra do projeto fornecedores são desativados (não excluídos), isso esconde itens válidos.
+### 1. Banco (`products`)
+Adicionar coluna `is_visible_in_recipes BOOLEAN NOT NULL DEFAULT true`.
+- Migração inicial: marcar `false` para todo produto que **não** aparece em nenhum `recipe_items.product_id`.
+- Produtos novos nascem `true` (default).
 
-2. **Auto-vínculo silencioso por similaridade de nome** (linha 338): se o nome detectado tem score ≥ 0.80 contra qualquer fornecedor ativo, o bot vincula sozinho sem perguntar. Resultado: o usuário nunca vê a lista e a nota fica amarrada a um fornecedor errado (ex.: "Hortifruti Central" casando com "Hortifruti Centro").
+### 2. Tela `Estoque` (`src/pages/Estoque.tsx`)
+- Mostrar badge "Oculto das fichas" nos produtos com `is_visible_in_recipes = false`.
+- Adicionar filtro/aba "Ocultos" além de "Ativos" e "Inativos".
+- Novo botão por linha: **"Liberar para fichas"** (quando oculto) / **"Ocultar das fichas"** (quando visível). Atualiza só `is_visible_in_recipes`, não mexe em `is_active`.
 
-3. **Mensagem `awaiting_supplier` sem opção `N`** (linha 442-449): quando a IA não detecta nome de fornecedor na nota, o menu só oferece "P - Sem fornecedor", não permite cadastrar um novo direto pelo WhatsApp.
+### 3. Tela `Fichas Técnicas` (`src/pages/FichasTecnicas.tsx`)
+- No seletor de ingrediente, filtrar `products` por `is_active = true AND is_visible_in_recipes = true`.
+- Produtos já vinculados a uma ficha continuam aparecendo na edição mesmo se ficarem ocultos depois (não quebrar receitas existentes) — manter o item carregado, só não listá-lo como nova opção.
 
-## Correção
+### 4. Compra manual (`src/pages/Compras.tsx`)
+- Ao buscar produto no formulário de compra, incluir ocultos na lista mas marcá-los com "(oculto das fichas)".
+- Ao salvar a compra com um produto oculto, exibir um toast/diálogo: *"Este produto está oculto das fichas técnicas. Deseja liberá-lo?"* com botões **Liberar** / **Manter oculto**. "Liberar" seta `is_visible_in_recipes = true`.
 
-Editar apenas `supabase/functions/webhook-zapi-purchase/index.ts`:
+### 5. WhatsApp (`supabase/functions/webhook-zapi-purchase/index.ts`)
+- Listagens de produtos para o usuário escolher: incluir ocultos, marcando "(oculto das fichas)" ao lado do nome.
+- Quando o usuário confirmar a compra de um produto oculto, enviar mensagem antes do `purchase_history.insert`:
+  > "⚠️ O produto *X* existe no estoque mas está oculto das fichas técnicas (não faz parte de nenhuma receita). Deseja liberá-lo para uso nas fichas? *S* - Sim, liberar / *N* - Manter oculto"
+- Novo status no fluxo: `awaiting_visibility_release`. Resposta `S` faz `update({ is_visible_in_recipes: true })` antes de gravar a compra; `N` grava a compra mantendo oculto.
 
-### 1. Mostrar todos os fornecedores (ativos primeiro)
-Trocar os 4 `SELECT ... .eq("is_active", true).order("name")` por `.order("is_active", { ascending: false }).order("name")`, exibindo "(inativo)" ao lado do nome na listagem. Assim o usuário enxerga tudo que existe no cadastro.
+## Resultado
 
-### 2. Nunca auto-vincular por similaridade de nome
-Em `resolveSupplier` (linhas 322-344):
-- Manter o match automático **apenas** por CNPJ exato (suppliers.cnpj ou supplier_aliases.cnpj).
-- Manter o match automático por alias normalizado salvo (porque foi confirmado pelo usuário antes).
-- **Remover** o bloco de score ≥ 0.80 que auto-aceita pelo nome — sempre devolver `needs_alias: true` quando só temos nome e não há alias salvo. Isso força o `advanceFlow` a mandar a lista para o usuário escolher.
-
-### 3. Adicionar opção "N - Cadastrar novo fornecedor" no fluxo `awaiting_supplier`
-No bloco 442-449 e no handler `awaiting_supplier` (linhas 546+), aceitar `N` mesmo quando não há `detected_supplier_name`, perguntando em seguida o nome do novo fornecedor (novo status `awaiting_new_supplier_name`) e gravando via `suppliers.insert`. Depois segue o fluxo normal de itens.
-
-### 4. Ajuste no handler `awaiting_supplier_alias / awaiting_supplier`
-Atualizar o índice de seleção (`sList[idx]`) para refletir a nova ordenação (ativos + inativos juntos). Ao escolher um inativo, reativar automaticamente (`is_active = true`) para não bagunçar relatórios.
-
-## Resultado esperado
-
-- Toda nota com fornecedor detectado por nome (sem CNPJ e sem alias salvo) **sempre** mostra a lista completa de fornecedores ao usuário.
-- Lista inclui fornecedores inativos marcados como "(inativo)".
-- Usuário pode digitar `N` em qualquer ponto para cadastrar um novo fornecedor direto pelo WhatsApp.
-- Após a primeira escolha, o alias fica salvo em `supplier_aliases` e a próxima nota do mesmo emitente é resolvida automaticamente — sem chutes por similaridade.
+- Fichas técnicas só listam produtos relevantes (usados em receitas ou liberados manualmente).
+- Estoque continua mostrando tudo, com badge clara do que está oculto.
+- Compras nunca falham por causa do filtro: o sistema avisa e dá a chance de liberar na hora.
 
 ## Fora do escopo
 
-- Não vou mexer no parser da IA, no fluxo de itens, em RLS, nem no schema.
-- Não vou alterar a tela `/fornecedores` no frontend.
+- Não mexer em `is_active` (continua sendo o flag de "desativado").
+- Não alterar RLS nem o parser da IA.
+- Não tocar no frontend de fornecedores nem no fluxo de itens da WhatsApp além do trecho de visibilidade.
