@@ -64,6 +64,8 @@ export default function Estoque() {
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all');
+
   const [formData, setFormData] = useState({
     name: '',
     unit: 'kg',
