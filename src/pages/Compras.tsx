@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
@@ -31,6 +32,7 @@ export default function Compras() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [releasePrompt, setReleasePrompt] = useState<{ id: string; name: string } | null>(null);
   const [formData, setFormData] = useState({
     product_id: '',
     supplier_id: '',
@@ -41,12 +43,13 @@ export default function Compras() {
   });
 
   const { data: products } = useQuery({
-    queryKey: ['products'],
+    queryKey: ['products-purchase'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
         .select('*')
         .eq('is_active', true)
+        .order('is_visible_in_recipes', { ascending: false })
         .order('name');
       if (error) throw error;
       return data;
@@ -105,14 +108,35 @@ export default function Compras() {
       }]);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_d, vars) => {
       queryClient.invalidateQueries({ queryKey: ['purchases'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['products-purchase'] });
       toast({ title: 'Compra registrada com sucesso!' });
+      const prod = products?.find(p => p.id === vars.product_id);
+      if (prod && (prod as any).is_visible_in_recipes === false) {
+        setReleasePrompt({ id: prod.id, name: prod.name });
+      }
       resetForm();
     },
     onError: (error) => {
       toast({ title: 'Erro ao registrar compra', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const releaseVisibilityMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('products').update({ is_visible_in_recipes: true }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products-purchase'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast({ title: 'Produto liberado para fichas técnicas' });
+      setReleasePrompt(null);
+    },
+    onError: (error: any) => {
+      toast({ title: 'Erro ao liberar produto', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -181,7 +205,9 @@ export default function Compras() {
                     </SelectTrigger>
                     <SelectContent>
                       {products?.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.name} ({p.unit})</SelectItem>
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name} ({p.unit}){(p as any).is_visible_in_recipes === false ? ' — oculto das fichas' : ''}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -342,6 +368,23 @@ export default function Compras() {
             )}
           </CardContent>
         </Card>
+
+        <AlertDialog open={!!releasePrompt} onOpenChange={(open) => { if (!open) setReleasePrompt(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Liberar produto para fichas técnicas?</AlertDialogTitle>
+              <AlertDialogDescription>
+                O produto <strong>{releasePrompt?.name}</strong> está oculto das fichas técnicas (não faz parte de nenhuma receita). Deseja liberá-lo para poder usá-lo em fichas?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setReleasePrompt(null)}>Manter oculto</AlertDialogCancel>
+              <AlertDialogAction onClick={() => releasePrompt && releaseVisibilityMutation.mutate(releasePrompt.id)}>
+                Liberar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </AppLayout>
   );

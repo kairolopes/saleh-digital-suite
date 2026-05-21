@@ -30,6 +30,7 @@ interface Product {
   name: string;
   unit: string;
   average_price: number;
+  is_visible_in_recipes?: boolean;
 }
 
 interface Recipe {
@@ -136,7 +137,7 @@ export default function FichasTecnicas() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("products")
-        .select("id, name, unit, average_price")
+        .select("id, name, unit, average_price, is_visible_in_recipes")
         .eq("is_active", true)
         .order("name");
       if (error) throw error;
@@ -1255,11 +1256,13 @@ export default function FichasTecnicas() {
                         </SelectTrigger>
                         <SelectContent>
                           {ingredientType === "product"
-                            ? products?.map((product) => (
-                                <SelectItem key={product.id} value={product.id}>
-                                  {product.name}
-                                </SelectItem>
-                              ))
+                            ? products
+                                ?.filter((product) => product.is_visible_in_recipes !== false)
+                                .map((product) => (
+                                  <SelectItem key={product.id} value={product.id}>
+                                    {product.name}
+                                  </SelectItem>
+                                ))
                             : subproducts
                                 .filter((sp) => sp.id !== editingRecipe?.id) // Exclude self
                                 .map((sp) => (

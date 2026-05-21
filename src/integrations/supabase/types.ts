@@ -505,6 +505,7 @@ export type Database = {
           default_supplier_id: string | null
           id: string
           is_active: boolean | null
+          is_visible_in_recipes: boolean
           last_price: number | null
           min_quantity: number | null
           name: string
@@ -519,6 +520,7 @@ export type Database = {
           default_supplier_id?: string | null
           id?: string
           is_active?: boolean | null
+          is_visible_in_recipes?: boolean
           last_price?: number | null
           min_quantity?: number | null
           name: string
@@ -533,6 +535,7 @@ export type Database = {
           default_supplier_id?: string | null
           id?: string
           is_active?: boolean | null
+          is_visible_in_recipes?: boolean
           last_price?: number | null
           min_quantity?: number | null
           name?: string

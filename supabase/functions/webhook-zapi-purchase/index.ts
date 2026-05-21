@@ -287,14 +287,16 @@ type ResolvedItem = {
   product_id: string | null;
   product_name: string | null;
   needs_creation: boolean;
-  ambiguous_options?: { id: string; name: string }[];
+  ambiguous_options?: { id: string; name: string; hidden?: boolean }[];
   suggested_category_id?: string | null;
   excluded?: boolean;
   creation_confirmed?: boolean;
+  is_hidden?: boolean;
+  release_decided?: boolean;
 };
 
 async function resolveItems(supabase: ReturnType<typeof getSupabase>, items: ParsedItem[]): Promise<ResolvedItem[]> {
-  const { data: products } = await supabase.from("products").select("id, name, unit").eq("is_active", true);
+  const { data: products } = await supabase.from("products").select("id, name, unit, is_visible_in_recipes").eq("is_active", true);
   const list = products || [];
   const resolved: ResolvedItem[] = [];
   for (const it of items) {
@@ -309,8 +311,9 @@ async function resolveItems(supabase: ReturnType<typeof getSupabase>, items: Par
     if (scored.length > 0 && scored[0].score >= 0.8 && (scored.length === 1 || scored[0].score - scored[1].score >= 0.15)) {
       r.product_id = scored[0].id;
       r.product_name = scored[0].name;
+      r.is_hidden = scored[0].is_visible_in_recipes === false;
     } else if (scored.length > 1) {
-      r.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name }));
+      r.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name, hidden: s.is_visible_in_recipes === false }));
     } else {
       r.needs_creation = true;
     }
@@ -355,8 +358,9 @@ function buildBatchPreview(items: ResolvedItem[], supplierName: string | null, d
       msg += `~${n}. ${i.produto}~ ❌ removido\n`;
     } else {
       const tag = i.needs_creation ? "🆕 cadastrar" : (i.product_name ? "✅" : "❓");
+      const hidden = i.is_hidden ? " 🙈 oculto" : "";
       const display = i.product_name || i.produto;
-      msg += `${n}. ${display} — ${i.quantidade} ${i.unidade} — R$ ${fmtCurrency(i.valor_total)} ${tag}\n`;
+      msg += `${n}. ${display}${hidden} — ${i.quantidade} ${i.unidade} — R$ ${fmtCurrency(i.valor_total)} ${tag}\n`;
     }
   });
   msg += `\n*1* - Confirmar tudo\n*2* - Cancelar\n*r N* - Remover item N (ex: r 3)`;
@@ -406,7 +410,7 @@ async function sendNextAmbiguousPrompt(
     items: items as any,
   }).eq("id", pendingId);
   let msg = `🔍 Item ${idx + 1}/${items.length}: "*${it.produto}*"\n\nMais de um produto parecido. Escolha:\n`;
-  it.ambiguous_options!.forEach((o, i) => { msg += `${i + 1} - ${o.name}\n`; });
+  it.ambiguous_options!.forEach((o, i) => { msg += `${i + 1} - ${o.name}${o.hidden ? " (oculto das fichas)" : ""}\n`; });
   msg += `*N* - Cadastrar como novo\n*P* - Pular este item`;
   await sendWhatsApp(phone, msg);
   return true;
@@ -514,6 +518,16 @@ async function handlePending(
   // remove command from batch confirm
   if (pending.status === "awaiting_batch_confirm") {
     if (lower === "1" || lower === "sim" || lower === "s") {
+      const active = items.filter(i => !i.excluded);
+      const hidden = active.filter(i => i.is_hidden && !i.release_decided);
+      if (hidden.length > 0) {
+        let msg = `⚠️ *Atenção:* ${hidden.length === 1 ? 'o produto abaixo existe' : 'os produtos abaixo existem'} no estoque mas ${hidden.length === 1 ? 'está oculto' : 'estão ocultos'} das fichas técnicas (não fazem parte de nenhuma receita):\n\n`;
+        hidden.forEach((h, i) => { msg += `${i + 1}. ${h.product_name || h.produto}\n`; });
+        msg += `\n*S* - Liberar ${hidden.length === 1 ? 'esse produto' : 'todos'} para uso nas fichas técnicas\n*N* - Manter ${hidden.length === 1 ? 'oculto' : 'todos ocultos'} e registrar a compra mesmo assim`;
+        await supabase.from("pending_whatsapp_purchases").update({ status: "awaiting_visibility_release", items: items as any }).eq("id", pending.id);
+        await sendWhatsApp(phone, msg);
+        return;
+      }
       await commitBatch(supabase, phone, pending);
       return;
     }
@@ -538,6 +552,33 @@ async function handlePending(
     await sendWhatsApp(phone, "🔄 Responda *1* (confirmar), *2* (cancelar) ou *r N* (remover item N).");
     return;
   }
+
+  if (pending.status === "awaiting_visibility_release") {
+    const active = items.filter(i => !i.excluded);
+    const hidden = active.filter(i => i.is_hidden && !i.release_decided);
+    if (lower === "s" || lower === "1" || lower === "sim") {
+      for (const h of hidden) {
+        if (h.product_id) {
+          await supabase.from("products").update({ is_visible_in_recipes: true }).eq("id", h.product_id);
+        }
+        h.release_decided = true;
+        h.is_hidden = false;
+      }
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      await sendWhatsApp(phone, `✅ ${hidden.length === 1 ? 'Produto liberado' : 'Produtos liberados'} para uso nas fichas técnicas.`);
+      await commitBatch(supabase, phone, pending);
+      return;
+    }
+    if (lower === "n" || lower === "2" || lower === "nao" || lower === "não") {
+      for (const h of hidden) { h.release_decided = true; }
+      await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
+      await commitBatch(supabase, phone, pending);
+      return;
+    }
+    await sendWhatsApp(phone, "🔄 Responda *S* (liberar) ou *N* (manter oculto).");
+    return;
+  }
+
 
   if (pending.status === "awaiting_new_supplier_name") {
     const newName = text.trim();
@@ -642,6 +683,7 @@ async function handlePending(
     if (!chosen) { await sendWhatsApp(phone, "❌ Não identifiquei. Responda com o número, *N* (novo) ou *P* (pular)."); return; }
     it.product_id = chosen.id;
     it.product_name = chosen.name;
+    it.is_hidden = (chosen as any).hidden === true;
     it.ambiguous_options = undefined;
     await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
     await advanceFlow(supabase, phone, pending.id, pending);
@@ -672,14 +714,14 @@ async function handlePending(
       return;
     }
     // tratar texto livre como busca
-    const { data: products } = await supabase.from("products").select("id, name, unit").eq("is_active", true);
+    const { data: products } = await supabase.from("products").select("id, name, unit, is_visible_in_recipes").eq("is_active", true);
     const scored = (products || []).map(p => ({ ...p, score: scoreProduct(text, p.name) })).filter(s => s.score >= 0.5).sort((a, b) => b.score - a.score);
     if (scored.length === 0) { await sendWhatsApp(phone, "❌ Não achei. Tente outro nome, ou responda *1* (cadastrar) ou *3* (pular)."); return; }
     if (scored.length > 1 && scored[0].score - scored[1].score < 0.15) {
       let msg = `🔍 Vários produtos parecidos:\n`;
-      scored.slice(0, 4).forEach((s, i) => { msg += `${i + 1} - ${s.name}\n`; });
+      scored.slice(0, 4).forEach((s, i) => { msg += `${i + 1} - ${s.name}${s.is_visible_in_recipes === false ? " (oculto das fichas)" : ""}\n`; });
       msg += `\nResponda o número exato.`;
-      it.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name }));
+      it.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name, hidden: s.is_visible_in_recipes === false }));
       it.needs_creation = false;
       await supabase.from("pending_whatsapp_purchases").update({
         items: items as any, status: "awaiting_product_choice",
@@ -689,6 +731,7 @@ async function handlePending(
     }
     it.product_id = scored[0].id;
     it.product_name = scored[0].name;
+    it.is_hidden = scored[0].is_visible_in_recipes === false;
     it.needs_creation = false;
     await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
     await advanceFlow(supabase, phone, pending.id, pending);

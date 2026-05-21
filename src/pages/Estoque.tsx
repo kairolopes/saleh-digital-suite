@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Pencil, Package, AlertTriangle, TrendingUp, Search, RefreshCw, Trash2, Tag, FolderOpen, ArrowRightLeft } from 'lucide-react';
+import { Plus, Pencil, Package, AlertTriangle, TrendingUp, Search, RefreshCw, Trash2, Tag, FolderOpen, ArrowRightLeft, Eye, EyeOff } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { z } from 'zod';
@@ -48,6 +48,7 @@ type Product = {
   last_price: number | null;
   min_quantity: number | null;
   is_active: boolean;
+  is_visible_in_recipes: boolean;
   category_id: string | null;
 };
 
@@ -63,6 +64,8 @@ export default function Estoque() {
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all');
+
   const [formData, setFormData] = useState({
     name: '',
     unit: 'kg',
@@ -286,6 +289,20 @@ export default function Estoque() {
       toast({ title: 'Erro ao excluir produto', description: error.message, variant: 'destructive' });
     },
   });
+  const toggleVisibilityMutation = useMutation({
+    mutationFn: async ({ id, visible }: { id: string; visible: boolean }) => {
+      const { error } = await supabase.from('products').update({ is_visible_in_recipes: visible }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: (_d, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast({ title: vars.visible ? 'Produto liberado para fichas técnicas' : 'Produto oculto das fichas técnicas' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Erro ao alterar visibilidade', description: error.message, variant: 'destructive' });
+    },
+  });
+
 
   const resetForm = () => {
     setFormData({ name: '', unit: 'kg', min_quantity: 0, category_id: null });
@@ -388,7 +405,12 @@ export default function Estoque() {
       : selectedCategoryFilter === 'uncategorized' 
         ? !p.category_id 
         : p.category_id === selectedCategoryFilter;
-    return matchesSearch && matchesCategory;
+    const matchesVisibility = visibilityFilter === 'all'
+      ? true
+      : visibilityFilter === 'visible'
+        ? p.is_visible_in_recipes !== false
+        : p.is_visible_in_recipes === false;
+    return matchesSearch && matchesCategory && matchesVisibility;
   });
 
   const totalPages = Math.ceil((filteredProducts?.length || 0) / itemsPerPage);
@@ -653,6 +675,16 @@ export default function Estoque() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <Select value={visibilityFilter} onValueChange={(v: 'all' | 'visible' | 'hidden') => { setVisibilityFilter(v); setCurrentPage(1); }}>
+                    <SelectTrigger className="w-full sm:w-[200px]">
+                      <SelectValue placeholder="Visibilidade" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos (visíveis + ocultos)</SelectItem>
+                      <SelectItem value="visible">Visíveis em fichas</SelectItem>
+                      <SelectItem value="hidden">Ocultos das fichas</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardHeader>
               <CardContent>
@@ -697,14 +729,29 @@ export default function Estoque() {
                                 <TableCell>{formatCurrency(product.average_price ?? 0)}/{product.unit}</TableCell>
                                 <TableCell>{formatCurrency(product.last_price ?? 0)}/{product.unit}</TableCell>
                                 <TableCell>
-                                  {(product.current_quantity ?? 0) <= (product.min_quantity ?? 0) ? (
-                                    <Badge variant="destructive">Baixo</Badge>
-                                  ) : (
-                                    <Badge className="bg-success">OK</Badge>
-                                  )}
+                                  <div className="flex flex-col gap-1">
+                                    {(product.current_quantity ?? 0) <= (product.min_quantity ?? 0) ? (
+                                      <Badge variant="destructive">Baixo</Badge>
+                                    ) : (
+                                      <Badge className="bg-success">OK</Badge>
+                                    )}
+                                    {product.is_visible_in_recipes === false && (
+                                      <Badge variant="outline" className="gap-1 font-normal text-xs">
+                                        <EyeOff className="h-3 w-3" /> Oculto
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </TableCell>
                                 <TableCell className="text-right">
                                   <div className="flex justify-end gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => toggleVisibilityMutation.mutate({ id: product.id, visible: !(product.is_visible_in_recipes !== false) })}
+                                      title={product.is_visible_in_recipes === false ? 'Liberar para fichas técnicas' : 'Ocultar das fichas técnicas'}
+                                    >
+                                      {product.is_visible_in_recipes === false ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                    </Button>
                                     <Button variant="ghost" size="icon" onClick={() => handleAdjustStock(product)} title="Ajustar estoque">
                                       <RefreshCw className="h-4 w-4" />
                                     </Button>
