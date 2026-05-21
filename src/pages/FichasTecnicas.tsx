@@ -137,7 +137,7 @@ export default function FichasTecnicas() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("products")
-        .select("id, name, unit, average_price")
+        .select("id, name, unit, average_price, is_visible_in_recipes")
         .eq("is_active", true)
         .order("name");
       if (error) throw error;
