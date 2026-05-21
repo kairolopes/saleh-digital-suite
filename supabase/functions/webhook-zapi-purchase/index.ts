@@ -287,14 +287,16 @@ type ResolvedItem = {
   product_id: string | null;
   product_name: string | null;
   needs_creation: boolean;
-  ambiguous_options?: { id: string; name: string }[];
+  ambiguous_options?: { id: string; name: string; hidden?: boolean }[];
   suggested_category_id?: string | null;
   excluded?: boolean;
   creation_confirmed?: boolean;
+  is_hidden?: boolean;
+  release_decided?: boolean;
 };
 
 async function resolveItems(supabase: ReturnType<typeof getSupabase>, items: ParsedItem[]): Promise<ResolvedItem[]> {
-  const { data: products } = await supabase.from("products").select("id, name, unit").eq("is_active", true);
+  const { data: products } = await supabase.from("products").select("id, name, unit, is_visible_in_recipes").eq("is_active", true);
   const list = products || [];
   const resolved: ResolvedItem[] = [];
   for (const it of items) {
@@ -309,8 +311,9 @@ async function resolveItems(supabase: ReturnType<typeof getSupabase>, items: Par
     if (scored.length > 0 && scored[0].score >= 0.8 && (scored.length === 1 || scored[0].score - scored[1].score >= 0.15)) {
       r.product_id = scored[0].id;
       r.product_name = scored[0].name;
+      r.is_hidden = scored[0].is_visible_in_recipes === false;
     } else if (scored.length > 1) {
-      r.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name }));
+      r.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name, hidden: s.is_visible_in_recipes === false }));
     } else {
       r.needs_creation = true;
     }
