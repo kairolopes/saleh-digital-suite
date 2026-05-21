@@ -473,17 +473,7 @@ async function commitBatch(
   let inserted = 0;
   let failed = 0;
   for (const it of items) {
-    let productId = it.product_id;
-    if (!productId && it.needs_creation) {
-      const { data: newProd, error: pErr } = await supabase.from("products").insert({
-        name: it.produto,
-        unit: it.unidade,
-        category_id: it.suggested_category_id || null,
-        is_active: true,
-      }).select("id").single();
-      if (pErr || !newProd) { console.error("create product failed", pErr); failed++; continue; }
-      productId = newProd.id;
-    }
+    const productId = it.product_id;
     if (!productId) { failed++; continue; }
     const { error: insErr } = await supabase.from("purchase_history").insert({
       product_id: productId,
