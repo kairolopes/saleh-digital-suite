@@ -410,7 +410,7 @@ async function sendNextAmbiguousPrompt(
   }).eq("id", pendingId);
   let msg = `🔍 Item ${idx + 1}/${items.length}: "*${it.produto}*"\n\nMais de um produto parecido. Escolha:\n`;
   it.ambiguous_options!.forEach((o, i) => { msg += `${i + 1} - ${o.name}${o.hidden ? " (oculto das fichas)" : ""}\n`; });
-  msg += `*N* - Cadastrar como novo\n*P* - Pular este item`;
+  msg += `*P* - Pular este item (cadastro de novos produtos só pela plataforma)`;
   await sendWhatsApp(phone, msg);
   return true;
 }
