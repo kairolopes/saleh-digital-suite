@@ -655,7 +655,6 @@ async function handlePending(
       await advanceFlow(supabase, phone, pending.id, pending);
       return;
     }
-    if (lower === "n") {
       it.needs_creation = true;
       it.ambiguous_options = undefined;
       await supabase.from("pending_whatsapp_purchases").update({ items: items as any }).eq("id", pending.id);
