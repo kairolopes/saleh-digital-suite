@@ -1256,11 +1256,13 @@ export default function FichasTecnicas() {
                         </SelectTrigger>
                         <SelectContent>
                           {ingredientType === "product"
-                            ? products?.map((product) => (
-                                <SelectItem key={product.id} value={product.id}>
-                                  {product.name}
-                                </SelectItem>
-                              ))
+                            ? products
+                                ?.filter((product) => product.is_visible_in_recipes !== false)
+                                .map((product) => (
+                                  <SelectItem key={product.id} value={product.id}>
+                                    {product.name}
+                                  </SelectItem>
+                                ))
                             : subproducts
                                 .filter((sp) => sp.id !== editingRecipe?.id) // Exclude self
                                 .map((sp) => (
