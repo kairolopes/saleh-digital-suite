@@ -45,6 +45,7 @@ type ProductCategory = {
 type Product = {
   id: string;
   name: string;
+  brand: string | null;
   unit: string;
   current_quantity: number | null;
   average_price: number | null;
