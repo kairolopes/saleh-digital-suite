@@ -321,7 +321,7 @@ export default function Estoque() {
 
 
   const resetForm = () => {
-    setFormData({ name: '', unit: 'kg', min_quantity: 0, category_id: null });
+    setFormData({ name: '', brand: '', unit: 'kg', min_quantity: 0, category_id: null });
     setEditingProduct(null);
     setIsDialogOpen(false);
   };
