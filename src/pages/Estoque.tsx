@@ -737,7 +737,14 @@ export default function Estoque() {
                             const cat = getCategoryName(product.category_id);
                             return (
                               <TableRow key={product.id}>
-                                <TableCell className="font-medium">{product.name}</TableCell>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span>{product.name}</span>
+                                    {product.brand && (
+                                      <Badge variant="secondary" className="font-normal text-xs">{product.brand}</Badge>
+                                    )}
+                                  </div>
+                                </TableCell>
                                 <TableCell>
                                   {cat ? (
                                     <Badge variant="outline" className="gap-1.5 font-normal" style={{ borderColor: cat.color, color: cat.color }}>
