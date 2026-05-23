@@ -626,7 +626,13 @@ export default function Estoque() {
                           <Label htmlFor="name">Nome do produto</Label>
                           <Input id="name" value={formData.name}
                             onChange={(e) => setFormData(f => ({ ...f, name: e.target.value }))}
-                            placeholder="Ex: Tomate" required />
+                            placeholder="Ex: Mussarela" required />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="brand">Marca <span className="text-muted-foreground text-xs">(opcional — preencha se houver variação por marca)</span></Label>
+                          <Input id="brand" value={formData.brand}
+                            onChange={(e) => setFormData(f => ({ ...f, brand: e.target.value }))}
+                            placeholder="Ex: VINILAC, CENAGGIO" maxLength={60} />
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="category">Categoria</Label>
