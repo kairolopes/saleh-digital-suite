@@ -19,10 +19,13 @@ import { z } from 'zod';
 
 const productSchema = z.object({
   name: z.string().min(2, 'Nome deve ter no mínimo 2 caracteres').max(100),
+  brand: z.string().max(60).optional().nullable(),
   unit: z.string().min(1, 'Selecione uma unidade'),
   min_quantity: z.number().min(0, 'Quantidade mínima deve ser positiva'),
   category_id: z.string().nullable().optional(),
 });
+
+const normalizeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const units = [
   { value: 'kg', label: 'Quilograma (kg)' },
@@ -42,6 +45,7 @@ type ProductCategory = {
 type Product = {
   id: string;
   name: string;
+  brand: string | null;
   unit: string;
   current_quantity: number | null;
   average_price: number | null;
@@ -68,6 +72,7 @@ export default function Estoque() {
 
   const [formData, setFormData] = useState({
     name: '',
+    brand: '' as string,
     unit: 'kg',
     min_quantity: 0,
     category_id: null as string | null,
@@ -176,8 +181,18 @@ export default function Estoque() {
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
+      // Check for duplicate by normalized name+unit+brand
+      const normNew = normalizeName(data.name) + '|' + (data.unit || '').toLowerCase() + '|' + normalizeName(data.brand || '');
+      const dup = (products || []).find(p =>
+        p.is_active &&
+        normalizeName(p.name) + '|' + (p.unit || '').toLowerCase() + '|' + normalizeName(p.brand || '') === normNew
+      );
+      if (dup && (!editingProduct || editingProduct.id !== dup.id)) {
+        throw new Error(`Já existe o produto "${dup.name}"${dup.brand ? ' (' + dup.brand + ')' : ''}. Ajuste o estoque dele em vez de criar duplicata.`);
+      }
       const { error } = await supabase.from('products').insert([{
-        name: data.name,
+        name: data.name.trim().replace(/\s+/g, ' '),
+        brand: data.brand?.trim() || null,
         unit: data.unit,
         min_quantity: data.min_quantity,
         category_id: data.category_id || null,
@@ -210,7 +225,8 @@ export default function Estoque() {
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: typeof formData }) => {
       const { error } = await supabase.from('products').update({
-        name: data.name,
+        name: data.name.trim().replace(/\s+/g, ' '),
+        brand: data.brand?.trim() || null,
         unit: data.unit,
         min_quantity: data.min_quantity,
         category_id: data.category_id || null,
@@ -305,7 +321,7 @@ export default function Estoque() {
 
 
   const resetForm = () => {
-    setFormData({ name: '', unit: 'kg', min_quantity: 0, category_id: null });
+    setFormData({ name: '', brand: '', unit: 'kg', min_quantity: 0, category_id: null });
     setEditingProduct(null);
     setIsDialogOpen(false);
   };
@@ -342,6 +358,7 @@ export default function Estoque() {
     setEditingProduct(product);
     setFormData({
       name: product.name,
+      brand: product.brand ?? '',
       unit: product.unit,
       min_quantity: product.min_quantity ?? 0,
       category_id: product.category_id,
@@ -609,7 +626,13 @@ export default function Estoque() {
                           <Label htmlFor="name">Nome do produto</Label>
                           <Input id="name" value={formData.name}
                             onChange={(e) => setFormData(f => ({ ...f, name: e.target.value }))}
-                            placeholder="Ex: Tomate" required />
+                            placeholder="Ex: Mussarela" required />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="brand">Marca <span className="text-muted-foreground text-xs">(opcional — preencha se houver variação por marca)</span></Label>
+                          <Input id="brand" value={formData.brand}
+                            onChange={(e) => setFormData(f => ({ ...f, brand: e.target.value }))}
+                            placeholder="Ex: VINILAC, CENAGGIO" maxLength={60} />
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="category">Categoria</Label>
@@ -714,7 +737,14 @@ export default function Estoque() {
                             const cat = getCategoryName(product.category_id);
                             return (
                               <TableRow key={product.id}>
-                                <TableCell className="font-medium">{product.name}</TableCell>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span>{product.name}</span>
+                                    {product.brand && (
+                                      <Badge variant="secondary" className="font-normal text-xs">{product.brand}</Badge>
+                                    )}
+                                  </div>
+                                </TableCell>
                                 <TableCell>
                                   {cat ? (
                                     <Badge variant="outline" className="gap-1.5 font-normal" style={{ borderColor: cat.color, color: cat.color }}>
