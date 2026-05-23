@@ -225,7 +225,8 @@ export default function Estoque() {
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: typeof formData }) => {
       const { error } = await supabase.from('products').update({
-        name: data.name,
+        name: data.name.trim().replace(/\s+/g, ' '),
+        brand: data.brand?.trim() || null,
         unit: data.unit,
         min_quantity: data.min_quantity,
         category_id: data.category_id || null,
