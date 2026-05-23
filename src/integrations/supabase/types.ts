@@ -499,6 +499,7 @@ export type Database = {
       products: {
         Row: {
           average_price: number | null
+          brand: string | null
           category_id: string | null
           created_at: string | null
           current_quantity: number | null
@@ -514,6 +515,7 @@ export type Database = {
         }
         Insert: {
           average_price?: number | null
+          brand?: string | null
           category_id?: string | null
           created_at?: string | null
           current_quantity?: number | null
@@ -529,6 +531,7 @@ export type Database = {
         }
         Update: {
           average_price?: number | null
+          brand?: string | null
           category_id?: string | null
           created_at?: string | null
           current_quantity?: number | null

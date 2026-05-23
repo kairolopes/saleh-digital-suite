@@ -1,41 +1,78 @@
 ## Objetivo
 
-Esconder das fichas técnicas os produtos do estoque que não são usados em nenhuma receita. O usuário precisa "liberar" manualmente esses produtos para que voltem a aparecer no seletor de ingredientes. Se uma compra (manual ou via WhatsApp) cair em um produto oculto, o sistema deve avisar que ele existe mas está oculto, e oferecer liberar.
+Eliminar produtos duplicados no estoque (mussarelas VINILAC, CENAGGIO e outros), consolidando quantidade e histórico em um único registro por produto, **preservando a marca** numa coluna própria. Em seguida, corrigir o upload em lote do Estoque para nunca mais criar duplicatas.
 
-## Mudanças
+## 1. Migração de schema
 
-### 1. Banco (`products`)
-Adicionar coluna `is_visible_in_recipes BOOLEAN NOT NULL DEFAULT true`.
-- Migração inicial: marcar `false` para todo produto que **não** aparece em nenhum `recipe_items.product_id`.
-- Produtos novos nascem `true` (default).
+- Adicionar coluna `brand TEXT` em `products` (nullable). Vai guardar a marca (ex.: `VINILAC`, `CENAGGIO`), permitindo que dois produtos com mesma essência ("mussarela") mas marcas diferentes convivam claramente identificados.
 
-### 2. Tela `Estoque` (`src/pages/Estoque.tsx`)
-- Mostrar badge "Oculto das fichas" nos produtos com `is_visible_in_recipes = false`.
-- Adicionar filtro/aba "Ocultos" além de "Ativos" e "Inativos".
-- Novo botão por linha: **"Liberar para fichas"** (quando oculto) / **"Ocultar das fichas"** (quando visível). Atualiza só `is_visible_in_recipes`, não mexe em `is_active`.
+## 2. Consolidação dos duplicados (operação de dados)
 
-### 3. Tela `Fichas Técnicas` (`src/pages/FichasTecnicas.tsx`)
-- No seletor de ingrediente, filtrar `products` por `is_active = true AND is_visible_in_recipes = true`.
-- Produtos já vinculados a uma ficha continuam aparecendo na edição mesmo se ficarem ocultos depois (não quebrar receitas existentes) — manter o item carregado, só não listá-lo como nova opção.
+Para cada grupo de duplicatas:
 
-### 4. Compra manual (`src/pages/Compras.tsx`)
-- Ao buscar produto no formulário de compra, incluir ocultos na lista mas marcá-los com "(oculto das fichas)".
-- Ao salvar a compra com um produto oculto, exibir um toast/diálogo: *"Este produto está oculto das fichas técnicas. Deseja liberá-lo?"* com botões **Liberar** / **Manter oculto**. "Liberar" seta `is_visible_in_recipes = true`.
+1. Escolher como **sobrevivente** o registro mais antigo (menor `created_at`).
+2. Atualizar no sobrevivente:
+   - `current_quantity` = soma de todas as quantidades do grupo.
+   - `average_price` = média ponderada `Σ(qty_i × avg_i) / Σ(qty_i)` (ignorando zeros para não enviesar).
+   - `last_price` = `last_price` do mais recente.
+   - `brand` = marca extraída do nome (ver lista abaixo).
+   - Normalizar `name` (trim, colapsar espaços, capitalizar de forma consistente).
+3. Reapontar registros filhos para o sobrevivente:
+   - `purchase_history.product_id`
+   - `stock_movements.product_id`
+   - `recipe_items.product_id`
+4. Inserir 1 `stock_movements` de auditoria por duplicata absorvida, tipo `ajuste`, notes: `"Consolidação de duplicata: <id antigo> mesclado em <id sobrevivente>"`.
+5. Marcar duplicatas restantes como `is_active = false` (não deletar, conforme regra do projeto).
 
-### 5. WhatsApp (`supabase/functions/webhook-zapi-purchase/index.ts`)
-- Listagens de produtos para o usuário escolher: incluir ocultos, marcando "(oculto das fichas)" ao lado do nome.
-- Quando o usuário confirmar a compra de um produto oculto, enviar mensagem antes do `purchase_history.insert`:
-  > "⚠️ O produto *X* existe no estoque mas está oculto das fichas técnicas (não faz parte de nenhuma receita). Deseja liberá-lo para uso nas fichas? *S* - Sim, liberar / *N* - Manter oculto"
-- Novo status no fluxo: `awaiting_visibility_release`. Resposta `S` faz `update({ is_visible_in_recipes: true })` antes de gravar a compra; `N` grava a compra mantendo oculto.
+### Grupos a consolidar
+
+| Grupo (normalizado) | Itens | Nome final sugerido | brand |
+|---|---|---|---|
+| `qjtmussvinilac` | 10 | `Mussarela VINILAC` | `VINILAC` |
+| `qjmusscenaggio` | 6 | `Mussarela CENAGGIO` | `CENAGGIO` |
+| `batatadoce` | 2 | `Batata doce` | null |
+| `salgrosso` | 2 | `Sal grosso` | null |
+| `bananadaterra` | 2 | `Banana da Terra` | null |
+| `alho` | 2 | `Alho` | null |
+| `beterraba` | 2 | `Beterraba` | null |
+| `oleosojavilavelha900ml` | 2 | `Óleo de Soja Vila Velha 900ml` | `Vila Velha` |
+| `pimentabode` | 2 | `Pimenta bode` | null |
+| `bdjfilemignonbovino` | 2 | `Filé Mignon Bovino (BDJ)` | `BDJ` |
+
+**Não consolidar** (são produtos legitimamente diferentes):
+- `Filme pvc 30m 600g` vs `Filme pvc 40m 600g` (medidas diferentes).
+- `Queijo mussarela` (o genérico, usado nas compras via WhatsApp) e `Mussarela de bufála - bola` permanecem como estão — não são duplicatas.
+
+## 3. Corrigir bulk upload no Estoque
+
+Em `src/pages/Estoque.tsx`, no fluxo de upload em lote (JSON):
+
+- Antes de inserir cada item, calcular chave normalizada `lower(trim(collapse_spaces(name))) + '|' + lower(unit)`.
+- Se já existe produto ativo com a mesma chave:
+  - **Não criar** novo registro.
+  - Somar `quantity` ao `current_quantity` do existente.
+  - Recalcular `average_price` ponderado se houver `unit_price` informado.
+  - Inserir um `stock_movements` tipo `entrada` referenciando o lote.
+- Se for novo, inserir normalmente (com `brand` opcional, se o JSON trouxer).
+- Mostrar no toast final um resumo: `X novos, Y mesclados em existentes`.
+
+## 4. Exibição da marca
+
+Em `src/pages/Estoque.tsx`:
+- Listar a coluna/badge `brand` ao lado do nome quando preenchida.
+- No formulário de criação/edição manual de produto, expor o campo `brand` (opcional).
+
+Não é necessário mexer em Fichas Técnicas, Compras manual ou no webhook do WhatsApp — eles continuam funcionando pelo `product_id`.
 
 ## Resultado
 
-- Fichas técnicas só listam produtos relevantes (usados em receitas ou liberados manualmente).
-- Estoque continua mostrando tudo, com badge clara do que está oculto.
-- Compras nunca falham por causa do filtro: o sistema avisa e dá a chance de liberar na hora.
+- Estoque limpo: 1 linha por (produto, marca, unidade), com quantidade somada correta.
+- Histórico de compras / movimentações / receitas preservados (apontam para o sobrevivente).
+- Marcas continuam visíveis e separadas quando relevante.
+- Próximos uploads em lote nunca mais criam duplicatas — somam ao existente.
 
 ## Fora do escopo
 
-- Não mexer em `is_active` (continua sendo o flag de "desativado").
-- Não alterar RLS nem o parser da IA.
-- Não tocar no frontend de fornecedores nem no fluxo de itens da WhatsApp além do trecho de visibilidade.
+- Não alterar lógica do WhatsApp.
+- Não mexer em `Filme pvc` (são SKUs diferentes).
+- Não criar tela de gestão de marcas; `brand` é só texto livre por enquanto.
