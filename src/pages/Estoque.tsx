@@ -181,8 +181,18 @@ export default function Estoque() {
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
+      // Check for duplicate by normalized name+unit+brand
+      const normNew = normalizeName(data.name) + '|' + (data.unit || '').toLowerCase() + '|' + normalizeName(data.brand || '');
+      const dup = (products || []).find(p =>
+        p.is_active &&
+        normalizeName(p.name) + '|' + (p.unit || '').toLowerCase() + '|' + normalizeName(p.brand || '') === normNew
+      );
+      if (dup && (!editingProduct || editingProduct.id !== dup.id)) {
+        throw new Error(`Já existe o produto "${dup.name}"${dup.brand ? ' (' + dup.brand + ')' : ''}. Ajuste o estoque dele em vez de criar duplicata.`);
+      }
       const { error } = await supabase.from('products').insert([{
-        name: data.name,
+        name: data.name.trim().replace(/\s+/g, ' '),
+        brand: data.brand?.trim() || null,
         unit: data.unit,
         min_quantity: data.min_quantity,
         category_id: data.category_id || null,
