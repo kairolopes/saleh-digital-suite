@@ -72,6 +72,7 @@ export default function Estoque() {
 
   const [formData, setFormData] = useState({
     name: '',
+    brand: '' as string,
     unit: 'kg',
     min_quantity: 0,
     category_id: null as string | null,
