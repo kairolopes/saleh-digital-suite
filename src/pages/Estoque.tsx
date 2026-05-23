@@ -358,6 +358,7 @@ export default function Estoque() {
     setEditingProduct(product);
     setFormData({
       name: product.name,
+      brand: product.brand ?? '',
       unit: product.unit,
       min_quantity: product.min_quantity ?? 0,
       category_id: product.category_id,
