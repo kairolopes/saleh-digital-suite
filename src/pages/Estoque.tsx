@@ -27,6 +27,17 @@ const productSchema = z.object({
 
 const normalizeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+// Normaliza para detectar âncoras de ficha técnica: tira acento, pontuação, números e medidas
+const normalizeAnchor = (s: string) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b\d+\s*(ml|l|kg|g|cm|m|un|lt|lts|mg)\b/g, ' ')
+    .replace(/\b\d+\b/g, ' ')
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 const units = [
   { value: 'kg', label: 'Quilograma (kg)' },
   { value: 'g', label: 'Grama (g)' },
@@ -189,6 +200,22 @@ export default function Estoque() {
       );
       if (dup && (!editingProduct || editingProduct.id !== dup.id)) {
         throw new Error(`Já existe o produto "${dup.name}"${dup.brand ? ' (' + dup.brand + ')' : ''}. Ajuste o estoque dele em vez de criar duplicata.`);
+      }
+      // Check against ficha-técnica anchors (produtos visíveis em receitas) — bloqueia variações de marca/embalagem
+      const newAnchor = normalizeAnchor(data.name);
+      if (newAnchor) {
+        const anchorMatch = (products || []).find(p =>
+          p.is_active && p.is_visible_in_recipes && p.unit === data.unit && (
+            normalizeAnchor(p.name) === newAnchor ||
+            normalizeAnchor(p.name).includes(newAnchor) ||
+            newAnchor.includes(normalizeAnchor(p.name))
+          )
+        );
+        if (anchorMatch && (!editingProduct || editingProduct.id !== anchorMatch.id)) {
+          throw new Error(
+            `Já existe "${anchorMatch.name}" na ficha técnica. Use esse produto e cadastre a marca "${data.brand || data.name}" como uma compra apontando para ele, em vez de criar um novo cadastro.`
+          );
+        }
       }
       const { error } = await supabase.from('products').insert([{
         name: data.name.trim().replace(/\s+/g, ' '),
