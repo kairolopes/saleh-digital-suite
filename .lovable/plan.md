@@ -1,78 +1,72 @@
-## Objetivo
+## Problema
 
-Eliminar produtos duplicados no estoque (mussarelas VINILAC, CENAGGIO e outros), consolidando quantidade e histórico em um único registro por produto, **preservando a marca** numa coluna própria. Em seguida, corrigir o upload em lote do Estoque para nunca mais criar duplicatas.
+Existem ~220 produtos ativos. Muitos são variações do mesmo insumo cadastrado como produtos distintos (ex.: `Filé mignon` vs `Filé Mignon Bovino (BDJ)`, `Catchup` vs `Katchup`, `Óleo de soja` vs `Óleo de Soja Vila Velha 900ml`, `Mussarela VINILAC` / `CENAGGIO` vs `Queijo mussarela`, `Margarina` vs `Margarina delicia kg` vs `Margarina Sina balde 80% 15kg`, etc.). Eles deveriam ser **o mesmo produto da ficha técnica**, com a marca/embalagem apenas em `brand`.
 
-## 1. Migração de schema
+## Estratégia
 
-- Adicionar coluna `brand TEXT` em `products` (nullable). Vai guardar a marca (ex.: `VINILAC`, `CENAGGIO`), permitindo que dois produtos com mesma essência ("mussarela") mas marcas diferentes convivam claramente identificados.
+Usar os 46 produtos **vinculados a `recipe_items`** como **âncoras canônicas**. Todo outro produto ativo cujo nome "encaixe" em uma âncora deve virar candidato a mesclagem nessa âncora (preservando marca/embalagem em `brand`).
 
-## 2. Consolidação dos duplicados (operação de dados)
+### Como detectar candidatos
 
-Para cada grupo de duplicatas:
+Para cada produto não-âncora com mesma `unit` de uma âncora, calcular score = combinação de:
 
-1. Escolher como **sobrevivente** o registro mais antigo (menor `created_at`).
-2. Atualizar no sobrevivente:
-   - `current_quantity` = soma de todas as quantidades do grupo.
-   - `average_price` = média ponderada `Σ(qty_i × avg_i) / Σ(qty_i)` (ignorando zeros para não enviesar).
-   - `last_price` = `last_price` do mais recente.
-   - `brand` = marca extraída do nome (ver lista abaixo).
-   - Normalizar `name` (trim, colapsar espaços, capitalizar de forma consistente).
-3. Reapontar registros filhos para o sobrevivente:
-   - `purchase_history.product_id`
-   - `stock_movements.product_id`
-   - `recipe_items.product_id`
-4. Inserir 1 `stock_movements` de auditoria por duplicata absorvida, tipo `ajuste`, notes: `"Consolidação de duplicata: <id antigo> mesclado em <id sobrevivente>"`.
-5. Marcar duplicatas restantes como `is_active = false` (não deletar, conforme regra do projeto).
+1. Match de token raiz (primeira palavra significativa, sem acento/case) — ex.: `mignon` ⊂ `Filé mignon` e `Filé Mignon Bovino (BDJ)`.
+2. Distância de Levenshtein normalizada ≤ 0,25 sobre nomes normalizados (trim, sem acentos, lower, sem pontuação, sem números/medidas como `350ml`, `5kg`, `un`).
+3. Contém o nome inteiro da âncora como substring (ex.: `Margarina delicia` contém `Margarina`).
+4. Sinônimos manuais conhecidos: `catchup↔katchup`, `mussarela↔queijo mussarela`, `oleo de soja↔óleo de soja`, `paprica↔páprica`.
 
-### Grupos a consolidar
+Cada candidato vira uma **proposta** com: âncora sobrevivente, duplicata a absorver, marca extraída (palavras restantes após remover a âncora — ex.: `VINILAC`, `Vila Velha 900ml`, `BDJ`, `delicia`, `Sina balde 80% 15kg`).
 
-| Grupo (normalizado) | Itens | Nome final sugerido | brand |
-|---|---|---|---|
-| `qjtmussvinilac` | 10 | `Mussarela VINILAC` | `VINILAC` |
-| `qjmusscenaggio` | 6 | `Mussarela CENAGGIO` | `CENAGGIO` |
-| `batatadoce` | 2 | `Batata doce` | null |
-| `salgrosso` | 2 | `Sal grosso` | null |
-| `bananadaterra` | 2 | `Banana da Terra` | null |
-| `alho` | 2 | `Alho` | null |
-| `beterraba` | 2 | `Beterraba` | null |
-| `oleosojavilavelha900ml` | 2 | `Óleo de Soja Vila Velha 900ml` | `Vila Velha` |
-| `pimentabode` | 2 | `Pimenta bode` | null |
-| `bdjfilemignonbovino` | 2 | `Filé Mignon Bovino (BDJ)` | `BDJ` |
+### Importante: confirmação obrigatória
 
-**Não consolidar** (são produtos legitimamente diferentes):
-- `Filme pvc 30m 600g` vs `Filme pvc 40m 600g` (medidas diferentes).
-- `Queijo mussarela` (o genérico, usado nas compras via WhatsApp) e `Mussarela de bufála - bola` permanecem como estão — não são duplicatas.
+Não dá para mesclar automaticamente porque há falsos positivos óbvios (`Açúcar cristal` vs `Açúcar refinado`, `Bacon` vs `Bacon fino`, `Sal refinado` vs `Sal grosso`, `Refri coca 355ml` vs `Refri coca 1lt`, `Cerveja heineken long neck` vs `Cerveja heineken 600ml`, `Pimenta bode` vs `Pimenta dedo de moça`, `Filme pvc 30m` vs `Filme pvc 40m`). O usuário precisa aprovar grupo a grupo.
 
-## 3. Corrigir bulk upload no Estoque
+## Execução (após aprovação)
 
-Em `src/pages/Estoque.tsx`, no fluxo de upload em lote (JSON):
+### Etapa 1 — Gerar e mostrar relatório de candidatos
 
-- Antes de inserir cada item, calcular chave normalizada `lower(trim(collapse_spaces(name))) + '|' + lower(unit)`.
-- Se já existe produto ativo com a mesma chave:
-  - **Não criar** novo registro.
-  - Somar `quantity` ao `current_quantity` do existente.
-  - Recalcular `average_price` ponderado se houver `unit_price` informado.
-  - Inserir um `stock_movements` tipo `entrada` referenciando o lote.
-- Se for novo, inserir normalmente (com `brand` opcional, se o JSON trouxer).
-- Mostrar no toast final um resumo: `X novos, Y mesclados em existentes`.
+Rodar a heurística e listar no chat todos os grupos detectados, agrupados em 3 níveis de confiança:
 
-## 4. Exibição da marca
+- **Alta confiança** (substring exata da âncora ou sinônimo conhecido): `Catchup`/`Katchup`, `Óleo de soja`/`Óleo de Soja Vila Velha 900ml`, `Filé mignon`/`Filé Mignon Bovino (BDJ)`, `Mussarela VINILAC`/`Mussarela CENAGGIO` → `Queijo mussarela`, `Margarina delicia kg`/`Margarina Sina balde 80% 15kg` → `Margarina`, `Arroz` → `Arroz cristal`, `Repolho` → `Repolho branco`, `Banana da Terra` (a inativa já foi tratada na rodada anterior).
+- **Média confiança** (distância pequena, mesma unidade, mesmo radical): pedir confirmação 1 a 1.
+- **Não tocar**: SKUs com medida/sabor distintos (refris, cervejas, águas com/sem gás, tipos de pimenta, tipos de açúcar, `Bacon` vs `Bacon fino`, `Filme pvc 30m` vs `40m`, `Paprica doce` vs `Paprica doce defumada`).
+
+O relatório é apresentado como tabela "ÂNCORA ← duplicata (marca extraída, qty atual)". Usuário marca quais aprovar.
+
+### Etapa 2 — Migração de consolidação (mesmo padrão da rodada anterior)
+
+Para cada par aprovado:
+
+1. Sobrevivente = produto âncora (o que está em `recipe_items`).
+2. `current_quantity` += quantidade da duplicata.
+3. `average_price` = média ponderada por quantidade.
+4. `last_price` = do mais recente.
+5. Se `brand` da âncora ainda está nulo e a marca extraída faz sentido, **não** sobrescrever — deixar nulo (a âncora é genérica). A marca fica registrada na nota do `stock_movements` de auditoria.
+6. Reapontar `purchase_history.product_id`, `stock_movements.product_id`, `recipe_items.product_id` para o sobrevivente.
+7. Inserir `stock_movements` tipo `ajuste` com nota: `"Consolidação: <nome duplicata> (marca: <X>) absorvido em <âncora>"`.
+8. `UPDATE products SET is_active = false` na duplicata.
+
+### Etapa 3 — Prevenção (frontend)
 
 Em `src/pages/Estoque.tsx`:
-- Listar a coluna/badge `brand` ao lado do nome quando preenchida.
-- No formulário de criação/edição manual de produto, expor o campo `brand` (opcional).
 
-Não é necessário mexer em Fichas Técnicas, Compras manual ou no webhook do WhatsApp — eles continuam funcionando pelo `product_id`.
+- No **bulk upload JSON** e na **criação manual**, antes de inserir, normalizar o nome (sem acento, lower, sem pontuação, sem medidas) e comparar com produtos ativos.
+- Se houver match com um produto **que está em receita** (âncora), bloquear a criação e mostrar diálogo: `"Já existe '<âncora>' na ficha técnica. Use o produto existente ou registre a compra apontando para ele. Continuar mesmo assim?"` (com botão "Usar existente" / "Criar novo mesmo assim").
+- Se for upload em lote, agregar como já fazemos e somar à âncora encontrada (em vez de criar novo).
 
-## Resultado
+Em `src/pages/Compras.tsx` (WhatsApp e manual já apontam para `product_id`, sem mudança necessária — o webhook já usa matching semântico).
 
-- Estoque limpo: 1 linha por (produto, marca, unidade), com quantidade somada correta.
-- Histórico de compras / movimentações / receitas preservados (apontam para o sobrevivente).
-- Marcas continuam visíveis e separadas quando relevante.
-- Próximos uploads em lote nunca mais criam duplicatas — somam ao existente.
+## Detalhes técnicos
+
+- Migração será um único arquivo SQL com `DO $$` blocks por par aprovado, para manter atomicidade por grupo.
+- Não mexer em `Filme pvc`, refris, cervejas, águas saborizadas, tipos de pimenta, tipos de açúcar, `Bacon`/`Bacon fino`.
+- Não mexer no webhook do WhatsApp.
 
 ## Fora do escopo
 
-- Não alterar lógica do WhatsApp.
-- Não mexer em `Filme pvc` (são SKUs diferentes).
-- Não criar tela de gestão de marcas; `brand` é só texto livre por enquanto.
+- Criar UI de "merge produtos" administrativa (poderia ser feita depois se for recorrente).
+- Renomear automaticamente produtos âncora (manter nome como está nas receitas).
+
+---
+
+**Próximo passo**: Se aprovar este plano, na implementação eu vou primeiro **listar no chat** todos os grupos candidatos detectados (com nomes, IDs e quantidades), você marca quais mesclar, e só então rodo a migração + ajustes no Estoque.
