@@ -27,6 +27,17 @@ const productSchema = z.object({
 
 const normalizeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+// Normaliza para detectar âncoras de ficha técnica: tira acento, pontuação, números e medidas
+const normalizeAnchor = (s: string) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b\d+\s*(ml|l|kg|g|cm|m|un|lt|lts|mg)\b/g, ' ')
+    .replace(/\b\d+\b/g, ' ')
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 const units = [
   { value: 'kg', label: 'Quilograma (kg)' },
   { value: 'g', label: 'Grama (g)' },
