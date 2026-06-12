@@ -1,24 +1,18 @@
 ## Objetivo
-Remover de forma permanente as fichas técnicas antigas (pratos e subprodutos) que foram desativadas durante a substituição pelo novo cardápio, deixando apenas as 28 fichas atuais.
+Zerar todo o histórico de compras para recomeçar do zero.
 
-## Situação atual
-- 28 fichas novas (ativas) — as do arquivo Saleh - Antepastos.
-- 32 fichas antigas (`is_available = false`) ainda ocupando a tela de Fichas Técnicas.
-- Nenhuma das antigas está vinculada a pedidos (`order_items`).
-- 14 antigas são referenciadas como `subrecipe_id` apenas por outras antigas (cadeia interna do conjunto velho).
+## O que será apagado
+- `purchase_history` — 322 registros (todas as compras lançadas).
+- `pending_whatsapp_purchases` — 2 registros (compras pendentes via WhatsApp).
+- `stock_movements` do tipo `entrada` com `reference_type = 'compra'` — movimentações geradas pelas compras (para o estoque não ficar com histórico de entradas órfãs).
 
-## O que será feito
-1. Apagar `recipe_items` de todas as receitas com `is_available = false` (limpa as referências `subrecipe_id` internas e ingredientes).
-2. Apagar os `menu_items` antigos (`is_available = false`) que apontam para essas receitas — eles também foram desativados no passo anterior e não têm pedidos.
-3. Apagar as 32 receitas antigas em `public.recipes`.
+## O que NÃO será apagado
+- Produtos (`products`) permanecem; estoque atual, preço médio e último preço **não são recalculados** — ficam como estão hoje. Se quiser também zerar quantidades/preços dos produtos, me avise.
+- Fornecedores, fichas técnicas, pedidos, cardápio e financeiro permanecem intactos.
+- Saídas de estoque por pedidos não são tocadas.
 
-Tudo em uma única transação via `supabase--insert` (DELETE). Se algo falhar (ex.: alguma FK inesperada), nada é gravado.
+## Execução
+Um único `DELETE` transacional via `supabase--insert` nas três tabelas acima. Em caso de erro, nada é gravado.
 
-## O que NÃO faço
-- Não toco nas 28 fichas novas nem em seus `recipe_items`.
-- Não mexo no cardápio ativo (`menu_items` com `is_available = true`).
-- Não altero pedidos, estoque, produtos nem nenhuma outra tabela.
-- Não altero schema — apenas DML.
-
-## Verificação final
-`SELECT COUNT(*) FROM recipes` deve retornar 28, todas com `is_available = true`.
+## Verificação
+`SELECT COUNT(*)` nas três tabelas deve retornar 0.
