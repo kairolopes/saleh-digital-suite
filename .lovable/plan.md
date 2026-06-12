@@ -1,18 +1,31 @@
 ## Objetivo
-Zerar todo o histórico de compras para recomeçar do zero.
+Limpeza total do módulo de estoque para recomeçar do zero. Fichas técnicas passarão a custar R$ 0 até as primeiras compras recalcularem o preço médio.
 
-## O que será apagado
-- `purchase_history` — 322 registros (todas as compras lançadas).
-- `pending_whatsapp_purchases` — 2 registros (compras pendentes via WhatsApp).
-- `stock_movements` do tipo `entrada` com `reference_type = 'compra'` — movimentações geradas pelas compras (para o estoque não ficar com histórico de entradas órfãs).
+## O que será alterado
+
+**Tabela `products`** (todos os insumos):
+- `current_quantity = 0` — zera estoque atual
+- `average_price = 0` — zera preço médio
+- `last_price = 0` — zera último preço
+
+**Tabela `stock_movements`**:
+- `DELETE` em todos os registros — apaga todo o histórico de entradas e saídas (compras antigas, saídas por pedidos, ajustes manuais).
 
 ## O que NÃO será apagado
-- Produtos (`products`) permanecem; estoque atual, preço médio e último preço **não são recalculados** — ficam como estão hoje. Se quiser também zerar quantidades/preços dos produtos, me avise.
-- Fornecedores, fichas técnicas, pedidos, cardápio e financeiro permanecem intactos.
-- Saídas de estoque por pedidos não são tocadas.
+- Produtos em si (cadastro, nome, unidade, categoria, fornecedor, estoque mínimo) — permanecem.
+- Fichas técnicas (`recipes`, `recipe_items`) — permanecem; custo calculado passa a ser R$ 0.
+- Cardápio, pedidos, financeiro, fornecedores, reservas — intactos.
+
+## Efeitos colaterais a observar
+- Fichas técnicas e relatórios de custo mostrarão R$ 0 até a primeira compra de cada insumo.
+- Próximos pedidos entregues vão deduzir do estoque e podem deixar quantidades **negativas** até você lançar compras.
+- Histórico de movimentações da tela de Estoque fica vazio.
 
 ## Execução
-Um único `DELETE` transacional via `supabase--insert` nas três tabelas acima. Em caso de erro, nada é gravado.
+Um único bloco transacional via `supabase--insert`:
+1. `DELETE FROM stock_movements`
+2. `UPDATE products SET current_quantity = 0, average_price = 0, last_price = 0`
 
 ## Verificação
-`SELECT COUNT(*)` nas três tabelas deve retornar 0.
+- `SELECT COUNT(*) FROM stock_movements` → 0
+- `SELECT COUNT(*) FROM products WHERE current_quantity <> 0 OR average_price <> 0 OR last_price <> 0` → 0
