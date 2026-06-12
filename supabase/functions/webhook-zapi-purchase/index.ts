@@ -355,15 +355,19 @@ function buildBatchPreview(items: ResolvedItem[], supplierName: string | null, d
   items.forEach((i, idx) => {
     const n = idx + 1;
     if (i.excluded) {
-      msg += `~${n}. ${i.produto}~ ❌ removido\n`;
-    } else {
-      const tag = i.needs_creation ? "⚠️ não cadastrado (será ignorado)" : (i.product_name ? "✅" : "❓");
-      const hidden = i.is_hidden ? " 🙈 oculto" : "";
-      const display = i.product_name || i.produto;
-      msg += `${n}. ${display}${hidden} — ${i.quantidade} ${i.unidade} — R$ ${fmtCurrency(i.valor_total)} ${tag}\n`;
+      msg += `~${n}. ${i.produto}~ ❌ removido\n\n`;
+      return;
     }
+    const tag = i.needs_creation ? "⚠️ não cadastrado (será ignorado)" : (i.product_name ? "✅" : "❓ confirmar");
+    const hidden = i.is_hidden ? " 🙈 oculto" : "";
+    const display = i.product_name || i.produto;
+    const unitPrice = i.quantidade > 0 ? i.valor_total / i.quantidade : 0;
+    msg += `*${n}. ${display}*${hidden} ${tag}\n`;
+    msg += `   • Quantidade: ${i.quantidade} ${i.unidade}\n`;
+    msg += `   • Valor total: R$ ${fmtCurrency(i.valor_total)}\n`;
+    msg += `   • Preço por ${i.unidade}: R$ ${fmtCurrency(unitPrice)}\n\n`;
   });
-  msg += `\n*1* - Confirmar tudo\n*2* - Cancelar\n*r N* - Remover item N (ex: r 3)`;
+  msg += `*1* - Confirmar tudo\n*2* - Cancelar\n*r N* - Remover item N (ex: r 3)`;
   return msg;
 }
 
