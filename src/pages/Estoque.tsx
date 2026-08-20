@@ -202,8 +202,10 @@ export default function Estoque() {
         throw new Error(`Já existe o produto "${dup.name}"${dup.brand ? ' (' + dup.brand + ')' : ''}. Ajuste o estoque dele em vez de criar duplicata.`);
       }
       // Check against ficha-técnica anchors (produtos visíveis em receitas) — bloqueia variações de marca/embalagem
+      // Modified: If a brand is provided, we allow the creation to avoid the "system error" perception, 
+      // as long as the specific name+brand+unit combo is unique (checked above).
       const newAnchor = normalizeAnchor(data.name);
-      if (newAnchor) {
+      if (newAnchor && !data.brand) {
         const anchorMatch = (products || []).find(p =>
           p.is_active && p.is_visible_in_recipes && p.unit === data.unit && (
             normalizeAnchor(p.name) === newAnchor ||
@@ -213,7 +215,7 @@ export default function Estoque() {
         );
         if (anchorMatch && (!editingProduct || editingProduct.id !== anchorMatch.id)) {
           throw new Error(
-            `Já existe "${anchorMatch.name}" na ficha técnica. Use esse produto e cadastre a marca "${data.brand || data.name}" como uma compra apontando para ele, em vez de criar um novo cadastro.`
+            `Já existe "${anchorMatch.name}" na ficha técnica. Para cadastrar uma marca específica, preencha o campo "Marca". Caso contrário, use o produto já existente.`
           );
         }
       }
