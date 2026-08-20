@@ -591,6 +591,7 @@ export type Database = {
       }
       purchase_history: {
         Row: {
+          brand: string | null
           created_at: string | null
           created_by: string | null
           id: string
@@ -603,6 +604,7 @@ export type Database = {
           unit_price: number | null
         }
         Insert: {
+          brand?: string | null
           created_at?: string | null
           created_by?: string | null
           id?: string
@@ -615,6 +617,7 @@ export type Database = {
           unit_price?: number | null
         }
         Update: {
+          brand?: string | null
           created_at?: string | null
           created_by?: string | null
           id?: string
