@@ -1,82 +1,45 @@
 ---
-title: Data Reset Plan
-description: Wipe all business data (stock, purchases, suppliers, recipes, menu, finance, orders) for a fresh system start.
+title: Add Brand Support to Purchase Flow
+description: Implement brand tracking in purchases both in the dashboard and WhatsApp integration.
 ---
 
-# Data Reset Plan
+# Plan: Add Brand Support to Purchase Flow
 
-The user wants to completely reset the system data ("zere o estoque, compras, fornecedores, ficha técnica, cardápio, financeiro, tudo") to start fresh.
+The user wants to be able to specify and track the brand of products during the purchase process, since this is already available in the product registration but missing in the purchase registration.
 
 ## Proposed Changes
 
-### Database Reset
-I will create a single migration to truncate all business-related tables. This will be performed in a specific order to respect foreign key constraints.
+### Database
+- Already added `brand` column to `public.purchase_history` via migration.
 
-**Tables to be cleared:**
-1.  `order_items` (linked to `orders` and `menu_items`)
-2.  `orders` (linked to `stock_movements`, `financial_entries`)
-3.  `stock_movements` (linked to `products`)
-4.  `purchase_history` (linked to `products`, `suppliers`)
-5.  `financial_entries` (linked to `orders`, etc.)
-6.  `recipe_items` (linked to `recipes`, `products`)
-7.  `menu_items` (linked to `recipes`)
-8.  `recipes`
-9.  `pending_whatsapp_purchases`
-10. `products`
-11. `suppliers`
-12. `product_categories`
-13. `audit_logs`
-14. `complaints`
-15. `customer_questions`
-16. `notifications`
-17. `ratings`
-18. `reservations`
-19. `suggestions`
+### Frontend (Dashboard)
+- **`src/pages/Compras.tsx`**:
+    - Add a "Marca" field to the "Nova Compra" dialog.
+    - Update the validation schema to include brand.
+    - Display the brand in the "Histórico de Compras" table.
+    - Automatically populate the brand field when a product is selected if that product has a default brand.
 
-**Tables to preserve:**
-- `profiles` and `user_roles` (to maintain user access)
-- `restaurant_settings` (to keep the business name, logo, etc., unless the user wants a full factory reset including branding)
-
-### Frontend Cleanup
-- I will remove the placeholder text from the element the user selected in the preview.
+### WhatsApp Integration (Edge Function)
+- **`supabase/functions/webhook-zapi-purchase/index.ts`**:
+    - Update `ParsedItem` and `ResolvedItem` types to include `brand`.
+    - Modify the AI prompt for both text and media parsing to extract the brand/make of the product (e.g., "Mussarela Cenaggio" -> product: Mussarela, brand: Cenaggio).
+    - Update the batch preview message to display the brand.
+    - Ensure the `brand` is saved to `purchase_history` when the purchase is confirmed.
 
 ## Technical Details
 
-### SQL Execution Order
-```sql
--- Disable triggers/FKs temporarily if needed, or truncate in reverse dependency order
-BEGIN;
+### Dashboard Edits
+- Add a new input field for `brand` in the `formData`.
+- Update the `createMutation` to include the `brand` field in the `insert` call.
+- Modify the `Table` to add a "Marca" column.
 
--- 1. Transactions/History
-TRUNCATE public.order_items CASCADE;
-TRUNCATE public.orders CASCADE;
-TRUNCATE public.stock_movements CASCADE;
-TRUNCATE public.purchase_history CASCADE;
-TRUNCATE public.financial_entries CASCADE;
-TRUNCATE public.pending_whatsapp_purchases CASCADE;
-TRUNCATE public.audit_logs CASCADE;
-TRUNCATE public.notifications CASCADE;
-
--- 2. Feedback/Customer Service
-TRUNCATE public.complaints CASCADE;
-TRUNCATE public.customer_questions CASCADE;
-TRUNCATE public.ratings CASCADE;
-TRUNCATE public.suggestions CASCADE;
-TRUNCATE public.reservations CASCADE;
-
--- 3. Operational Data (Recipes/Menu)
-TRUNCATE public.menu_items CASCADE;
-TRUNCATE public.recipe_items CASCADE;
-TRUNCATE public.recipes CASCADE;
-
--- 4. Core Catalog
-TRUNCATE public.products CASCADE;
-TRUNCATE public.suppliers CASCADE;
-TRUNCATE public.product_categories CASCADE;
-
-COMMIT;
-```
+### WhatsApp Webhook Edits
+- Update `register_purchase_batch` tool definition to include `marca` in `itens`.
+- Update `resolveItems` to potentially extract brand from product names if they follow the "Name BRAND" pattern established in previous tasks.
+- Modify `buildBatchPreview` to show the brand next to the product name.
+- Update the final insertion logic in the confirmation step to include the `brand` column.
 
 ## User Review Required
-> [!IMPORTANT]
-> This action is irreversible. All history, stock levels, recipes, and financial records will be deleted. Are you sure you want to proceed with the total wipe?
+
+> [!NOTE]
+> When the AI detects a brand in a WhatsApp message (like "20kg mussarela cenaggio"), it will now try to separate "Mussarela" as the product and "Cenaggio" as the brand.
