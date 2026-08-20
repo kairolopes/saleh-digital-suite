@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { TrendingUp, TrendingDown, AlertTriangle, DollarSign } from 'lucide-react';
@@ -114,14 +114,56 @@ export default function HistoricoPrecos() {
     };
   })() : null;
 
-  // Dados para o gráfico
-  const chartData = priceHistory?.map(p => ({
-    date: format(new Date(p.purchase_date), 'dd/MM', { locale: ptBR }),
-    fullDate: format(new Date(p.purchase_date), 'dd/MM/yyyy', { locale: ptBR }),
-    price: Number(p.unit_price),
-    quantity: Number(p.quantity),
-    supplier: p.suppliers?.name || 'N/A',
-  })) || [];
+  // Cores para as linhas das marcas
+  const brandColors = [
+    '#e07b20', // Laranja Saleh
+    '#3b82f6', // Azul
+    '#10b981', // Verde
+    '#ef4444', // Vermelho
+    '#8b5cf6', // Roxo
+    '#f59e0b', // Âmbar
+    '#06b6d4', // Ciano
+  ];
+
+  // Identificar todas as marcas únicas
+  const uniqueBrands = Array.from(new Set(priceHistory?.map(p => p.brand || 'Sem Marca') || []));
+
+  // Agrupar dados por data para o gráfico multi-linha
+  const chartDataMap: { [key: string]: any } = {};
+  
+  priceHistory?.forEach(p => {
+    const dateKey = format(new Date(p.purchase_date), 'dd/MM', { locale: ptBR });
+    const fullDate = format(new Date(p.purchase_date), 'dd/MM/yyyy', { locale: ptBR });
+    const brand = p.brand || 'Sem Marca';
+    const price = Number(p.unit_price);
+    
+    if (!chartDataMap[dateKey]) {
+      chartDataMap[dateKey] = {
+        date: dateKey,
+        fullDate: fullDate,
+        // Inicializar todas as marcas como null para evitar buracos no gráfico
+        ...Object.fromEntries(uniqueBrands.map(b => [b, null]))
+      };
+    }
+    
+    // Se houver múltiplas compras da mesma marca no mesmo dia, pegamos a última (ou média)
+    chartDataMap[dateKey][brand] = price;
+  });
+
+  const chartData = Object.values(chartDataMap).sort((a: any, b: any) => {
+    // Ordenação simplificada por data (assumindo que priceHistory veio ordenado por data)
+    return 0; 
+  });
+
+  // Re-ordenar chartData baseado na data real da compra para garantir continuidade
+  const sortedChartData = priceHistory 
+    ? Array.from(new Set(priceHistory.map(p => p.purchase_date)))
+        .sort()
+        .map(date => {
+          const dateKey = format(new Date(date), 'dd/MM', { locale: ptBR });
+          return chartDataMap[dateKey];
+        })
+    : [];
 
   return (
     <AppLayout requiredRoles={['admin', 'estoque', 'financeiro']}>
@@ -246,18 +288,12 @@ export default function HistoricoPrecos() {
               <CardContent>
                 {isLoading ? (
                   <p className="text-center py-8 text-muted-foreground">Carregando...</p>
-                ) : chartData.length === 0 ? (
+                ) : sortedChartData.length === 0 ? (
                   <p className="text-center py-8 text-muted-foreground">Nenhum histórico de compras para este produto.</p>
                 ) : (
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartData}>
-                        <defs>
-                          <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#e07b20" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#e07b20" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
+                      <LineChart data={sortedChartData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#e0dbd4" />
                         <XAxis dataKey="date" stroke="#7a7168" fontSize={12} />
                         <YAxis 
@@ -271,18 +307,24 @@ export default function HistoricoPrecos() {
                             border: '1px solid #e0dbd4',
                             borderRadius: '8px',
                           }}
-                          formatter={(value: number) => [formatCurrency(value), 'Preço']}
-                          labelFormatter={(label) => `Data: ${label}`}
+                          formatter={(value: number) => [formatCurrency(value), '']}
+                          labelFormatter={(label, payload) => `Data: ${payload[0]?.payload?.fullDate || label}`}
                         />
-                        <Area 
-                          type="monotone" 
-                          dataKey="price" 
-                          stroke="#e07b20" 
-                          fillOpacity={1} 
-                          fill="url(#colorPrice)"
-                          strokeWidth={2}
-                        />
-                      </AreaChart>
+                        <Legend />
+                        {uniqueBrands.map((brand, index) => (
+                          <Line
+                            key={brand}
+                            type="monotone"
+                            dataKey={brand}
+                            name={brand}
+                            stroke={brandColors[index % brandColors.length]}
+                            strokeWidth={2}
+                            dot={{ r: 4 }}
+                            activeDot={{ r: 6 }}
+                            connectNulls // Conecta os pontos mesmo se houver datas sem essa marca
+                          />
+                        ))}
+                      </LineChart>
                     </ResponsiveContainer>
                   </div>
                 )}
@@ -304,6 +346,7 @@ export default function HistoricoPrecos() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Data</TableHead>
+                          <TableHead>Marca</TableHead>
                           <TableHead>Quantidade</TableHead>
                           <TableHead>Valor Total</TableHead>
                           <TableHead>Preço Unitário</TableHead>
@@ -315,6 +358,9 @@ export default function HistoricoPrecos() {
                           <TableRow key={purchase.id}>
                             <TableCell>
                               {format(new Date(purchase.purchase_date), 'dd/MM/yyyy', { locale: ptBR })}
+                            </TableCell>
+                            <TableCell>
+                              {purchase.brand || '-'}
                             </TableCell>
                             <TableCell>
                               {Number(purchase.quantity).toFixed(3)} {selectedProductData?.unit}
