@@ -21,6 +21,7 @@ import { ptBR } from 'date-fns/locale';
 const purchaseSchema = z.object({
   product_id: z.string().min(1, 'Selecione um produto'),
   supplier_id: z.string().optional(),
+  brand: z.string().max(100).optional(),
   quantity: z.number().positive('Quantidade deve ser maior que zero'),
   total_price: z.number().positive('Valor deve ser maior que zero'),
   purchase_date: z.string().min(1, 'Selecione uma data'),
@@ -36,6 +37,7 @@ export default function Compras() {
   const [formData, setFormData] = useState({
     product_id: '',
     supplier_id: '',
+    brand: '',
     quantity: 0,
     total_price: 0,
     purchase_date: format(new Date(), 'yyyy-MM-dd'),
@@ -100,6 +102,7 @@ export default function Compras() {
       const { error } = await supabase.from('purchase_history').insert([{
         product_id: data.product_id,
         supplier_id: data.supplier_id || null,
+        brand: data.brand || null,
         quantity: data.quantity,
         total_price: data.total_price,
         purchase_date: data.purchase_date,
@@ -144,6 +147,7 @@ export default function Compras() {
     setFormData({
       product_id: '',
       supplier_id: '',
+      brand: '',
       quantity: 0,
       total_price: 0,
       purchase_date: format(new Date(), 'yyyy-MM-dd'),
@@ -199,7 +203,17 @@ export default function Compras() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label>Produto *</Label>
-                  <Select value={formData.product_id} onValueChange={(v) => setFormData(f => ({ ...f, product_id: v }))}>
+                  <Select 
+                    value={formData.product_id} 
+                    onValueChange={(v) => {
+                      const prod = products?.find(p => p.id === v);
+                      setFormData(f => ({ 
+                        ...f, 
+                        product_id: v,
+                        brand: prod?.brand || f.brand
+                      }));
+                    }}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Selecione o produto" />
                     </SelectTrigger>
@@ -212,18 +226,28 @@ export default function Compras() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label>Fornecedor</Label>
-                  <Select value={formData.supplier_id} onValueChange={(v) => setFormData(f => ({ ...f, supplier_id: v }))}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o fornecedor (opcional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {suppliers?.map(s => (
-                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Fornecedor</Label>
+                    <Select value={formData.supplier_id} onValueChange={(v) => setFormData(f => ({ ...f, supplier_id: v }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione o fornecedor (opcional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {suppliers?.map(s => (
+                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Marca</Label>
+                    <Input
+                      value={formData.brand}
+                      onChange={(e) => setFormData(f => ({ ...f, brand: e.target.value }))}
+                      placeholder="Ex: Cenaggio"
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -337,6 +361,7 @@ export default function Compras() {
                     <TableRow>
                       <TableHead>Data</TableHead>
                       <TableHead>Produto</TableHead>
+                      <TableHead>Marca</TableHead>
                       <TableHead>Quantidade</TableHead>
                       <TableHead>Valor Total</TableHead>
                       <TableHead>Preço Unit.</TableHead>
@@ -351,6 +376,9 @@ export default function Compras() {
                         </TableCell>
                         <TableCell className="font-medium">
                           {purchase.products?.name}
+                        </TableCell>
+                        <TableCell>
+                          {purchase.brand || '-'}
                         </TableCell>
                         <TableCell>
                           {Number(purchase.quantity).toFixed(3)} {purchase.products?.unit}

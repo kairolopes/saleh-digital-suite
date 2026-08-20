@@ -66,7 +66,7 @@ async function downloadAsBase64(url: string): Promise<{ base64: string; mimeType
   } catch (e) { console.error("download error", e); return null; }
 }
 
-type ParsedItem = { produto: string; quantidade: number; unidade: string; valor_total: number };
+type ParsedItem = { produto: string; quantidade: number; unidade: string; valor_total: number; marca?: string };
 type ParsedBatch = {
   itens: ParsedItem[];
   fornecedor_nome: string | null;
@@ -127,6 +127,7 @@ REGRAS:
                   type: "object",
                   properties: {
                     produto: { type: "string" },
+                    marca: { type: "string", description: "Marca ou fabricante do produto" },
                     quantidade: { type: "number" },
                     unidade: { type: "string" },
                     valor_total: { type: "number", description: "Valor total da linha em reais" },
@@ -171,6 +172,7 @@ REGRAS:
         quantidade: qty,
         unidade: String(i.unidade || "un"),
         valor_total: total,
+        marca: i.marca ? String(i.marca).trim() : undefined,
       });
     }
     if (itens.length === 0) return null;
@@ -199,10 +201,12 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
 - "X reais" / "R$ X" / "a X" = valor_total da compra inteira (nao unitario), salvo se disser "cada", "a unidade", "o kg".
 - Se vier preco unitario explicito ("a 2,50 o kg", "cada um custa 5"), use valor_unitario e nao valor_total.
 - Aceite QUALQUER valor numerico, mesmo que pareca alto (ex: 8000 reais por 20kg).
+- Identifique a MARCA se mencionada (ex: "mussarela cenaggio" -> produto: mussarela, marca: cenaggio).
 - Fornecedor opcional, mencionado por "no/na/do/comprei do".
 - SEMPRE chame a tool register_purchase_batch, mesmo com 1 item. Se faltar info, chame mesmo assim com o que conseguir.
 - Exemplos:
   "20kg cebola 8000 reais" -> {produto:"cebola", quantidade:20, unidade:"kg", valor_total:8000}
+  "mussarela cenaggio 5kg 200 reais" -> {produto:"mussarela", marca:"cenaggio", quantidade:5, unidade:"kg", valor_total:200}
   "bife 10kg 8000 reais" -> {produto:"bife", quantidade:10, unidade:"kg", valor_total:8000}
   "oleo 24 unidades a 9000 reais" -> {produto:"oleo", quantidade:24, unidade:"un", valor_total:9000}
   "5kg arroz a 6 o kg" -> {produto:"arroz", quantidade:5, unidade:"kg", valor_unitario:6}`,
@@ -224,6 +228,7 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
                   type: "object",
                   properties: {
                     produto: { type: "string" },
+                    marca: { type: "string" },
                     quantidade: { type: "number" },
                     unidade: { type: "string" },
                     valor_total: { type: ["number", "null"] },
@@ -268,6 +273,7 @@ async function parseTextWithAI(messageText: string): Promise<ParsedBatch | null>
         quantidade: qty,
         unidade: String(i.unidade || "un"),
         valor_total: total,
+        marca: i.marca ? String(i.marca).trim() : undefined,
       });
     }
     if (itens.length === 0) return null;
@@ -281,6 +287,7 @@ function getSupabase() {
 
 type ResolvedItem = {
   produto: string;
+  marca?: string;
   quantidade: number;
   unidade: string;
   valor_total: number;
@@ -311,6 +318,7 @@ async function resolveItems(supabase: ReturnType<typeof getSupabase>, items: Par
     if (scored.length > 0 && scored[0].score >= 0.8 && (scored.length === 1 || scored[0].score - scored[1].score >= 0.15)) {
       r.product_id = scored[0].id;
       r.product_name = scored[0].name;
+      r.marca = r.marca || (scored[0] as any).brand || undefined;
       r.is_hidden = scored[0].is_visible_in_recipes === false;
     } else if (scored.length > 1) {
       r.ambiguous_options = scored.slice(0, 4).map(s => ({ id: s.id, name: s.name, hidden: s.is_visible_in_recipes === false }));
@@ -361,8 +369,9 @@ function buildBatchPreview(items: ResolvedItem[], supplierName: string | null, d
     const tag = i.needs_creation ? "⚠️ não cadastrado (será ignorado)" : (i.product_name ? "✅" : "❓ confirmar");
     const hidden = i.is_hidden ? " 🙈 oculto" : "";
     const display = i.product_name || i.produto;
+    const marca = i.marca ? ` (${i.marca})` : "";
     const unitPrice = i.quantidade > 0 ? i.valor_total / i.quantidade : 0;
-    msg += `*${n}. ${display}*${hidden} ${tag}\n`;
+    msg += `*${n}. ${display}${marca}*${hidden} ${tag}\n`;
     msg += `   • Quantidade: ${i.quantidade} ${i.unidade}\n`;
     msg += `   • Valor total: R$ ${fmtCurrency(i.valor_total)}\n`;
     msg += `   • Preço por ${i.unidade}: R$ ${fmtCurrency(unitPrice)}\n\n`;
@@ -485,6 +494,7 @@ async function commitBatch(
     }
     const { error: insErr } = await supabase.from("purchase_history").insert({
       product_id: productId,
+      brand: it.marca || null,
       quantity: it.quantidade,
       total_price: it.valor_total,
       supplier_id: pending.supplier_id,
