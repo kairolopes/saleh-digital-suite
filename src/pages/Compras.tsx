@@ -18,6 +18,16 @@ import { z } from 'zod';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+const normalizeAnchor = (s: string) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b\d+\s*(ml|l|kg|g|cm|m|un|lt|lts|mg)\b/g, ' ')
+    .replace(/\b\d+\b/g, ' ')
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 const purchaseSchema = z.object({
   product_id: z.string().min(1, 'Selecione um produto'),
   supplier_id: z.string().optional(),
