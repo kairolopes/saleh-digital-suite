@@ -242,11 +242,25 @@ export default function Compras() {
                   </div>
                   <div className="space-y-2">
                     <Label>Marca</Label>
-                    <Input
-                      value={formData.brand}
-                      onChange={(e) => setFormData(f => ({ ...f, brand: e.target.value }))}
-                      placeholder="Ex: Cenaggio"
-                    />
+                    <Select 
+                      value={formData.brand} 
+                      onValueChange={(v) => setFormData(f => ({ ...f, brand: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione a marca" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GENERICA">Marca Genérica</SelectItem>
+                        {products
+                          ?.filter(p => normalizeAnchor(p.name) === normalizeAnchor(selectedProduct?.name || ''))
+                          .map(p => p.brand)
+                          .filter((b, i, self) => b && self.indexOf(b) === i)
+                          .map(brand => (
+                            <SelectItem key={brand} value={brand!}>{brand}</SelectItem>
+                          ))
+                        }
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
