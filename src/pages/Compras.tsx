@@ -18,6 +18,16 @@ import { z } from 'zod';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+const normalizeAnchor = (s: string) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b\d+\s*(ml|l|kg|g|cm|m|un|lt|lts|mg)\b/g, ' ')
+    .replace(/\b\d+\b/g, ' ')
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 const purchaseSchema = z.object({
   product_id: z.string().min(1, 'Selecione um produto'),
   supplier_id: z.string().optional(),
@@ -242,11 +252,25 @@ export default function Compras() {
                   </div>
                   <div className="space-y-2">
                     <Label>Marca</Label>
-                    <Input
-                      value={formData.brand}
-                      onChange={(e) => setFormData(f => ({ ...f, brand: e.target.value }))}
-                      placeholder="Ex: Cenaggio"
-                    />
+                    <Select 
+                      value={formData.brand} 
+                      onValueChange={(v) => setFormData(f => ({ ...f, brand: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione a marca" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GENERICA">Marca Genérica</SelectItem>
+                        {products
+                          ?.filter(p => normalizeAnchor(p.name) === normalizeAnchor(selectedProduct?.name || ''))
+                          .map(p => p.brand)
+                          .filter((b, i, self) => b && self.indexOf(b) === i)
+                          .map(brand => (
+                            <SelectItem key={brand} value={brand!}>{brand}</SelectItem>
+                          ))
+                        }
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
