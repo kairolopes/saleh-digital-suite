@@ -185,7 +185,9 @@ export default function HistoricoPrecos() {
               </SelectTrigger>
               <SelectContent>
                 {products?.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name} ({p.unit})</SelectItem>
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}{(p as any).brand ? ` — ${(p as any).brand}` : ''} ({p.unit})
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

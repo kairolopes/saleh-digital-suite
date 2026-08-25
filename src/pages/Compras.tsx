@@ -230,7 +230,7 @@ export default function Compras() {
                     <SelectContent>
                       {products?.map(p => (
                         <SelectItem key={p.id} value={p.id}>
-                          {p.name} ({p.unit}){(p as any).is_visible_in_recipes === false ? ' — oculto das fichas' : ''}
+                          {p.name}{(p as any).brand ? ` — ${(p as any).brand}` : ''} ({p.unit}){(p as any).is_visible_in_recipes === false ? ' · oculto das fichas' : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>
