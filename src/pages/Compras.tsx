@@ -44,7 +44,18 @@ export default function Compras() {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [releasePrompt, setReleasePrompt] = useState<{ id: string; name: string } | null>(null);
-  const [editing, setEditing] = useState<{ id: string; supplier_id: string; productName: string } | null>(null);
+  const [editing, setEditing] = useState<{
+    id: string;
+    product_id: string;
+    supplier_id: string;
+    brand: string;
+    quantity: number;
+    total_price: number;
+    purchase_date: string;
+    notes: string;
+    productName: string;
+    unit: string;
+  } | null>(null);
   const [formData, setFormData] = useState({
     product_id: '',
     supplier_id: '',
