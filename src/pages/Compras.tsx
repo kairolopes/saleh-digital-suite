@@ -506,41 +506,110 @@ export default function Compras() {
         </AlertDialog>
 
         <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null); }}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Alterar fornecedor</DialogTitle>
+              <DialogTitle>Editar compra</DialogTitle>
               <DialogDescription>
-                Corrija o fornecedor da compra de <strong>{editing?.productName}</strong>
+                Corrija os dados da compra de <strong>{editing?.productName}</strong>
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Fornecedor</Label>
-                <Select
-                  value={editing?.supplier_id || 'NENHUM'}
-                  onValueChange={(v) => setEditing(e => e ? { ...e, supplier_id: v } : e)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione o fornecedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="NENHUM">Sem fornecedor</SelectItem>
-                    {suppliers?.map(s => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {editing && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Data da compra</Label>
+                  <Input
+                    type="date"
+                    value={editing.purchase_date}
+                    onChange={(e) => setEditing(s => s ? { ...s, purchase_date: e.target.value } : s)}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Quantidade ({editing.unit})</Label>
+                    <Input
+                      type="number"
+                      step="0.001"
+                      value={editing.quantity}
+                      onChange={(e) => setEditing(s => s ? { ...s, quantity: parseFloat(e.target.value) || 0 } : s)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Valor total (R$)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={editing.total_price}
+                      onChange={(e) => setEditing(s => s ? { ...s, total_price: parseFloat(e.target.value) || 0 } : s)}
+                    />
+                  </div>
+                </div>
+
+                {editing.quantity > 0 && editing.total_price > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Preço unitário: {formatCurrency(editing.total_price / editing.quantity)}/{editing.unit}
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Marca</Label>
+                  <Select
+                    value={editing.brand || 'GENERICA'}
+                    onValueChange={(v) => setEditing(s => s ? { ...s, brand: v } : s)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione a marca" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="GENERICA">Marca genérica</SelectItem>
+                      {Array.from(new Set([
+                        ...(products?.filter(p => p.id === editing.product_id).map(p => (p as any).brand) || []),
+                        ...(purchases?.filter(p => p.product_id === editing.product_id).map(p => p.brand) || []),
+                      ].filter(Boolean) as string[])).map(b => (
+                        <SelectItem key={b} value={b}>{b}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Fornecedor</Label>
+                  <Select
+                    value={editing.supplier_id || 'NENHUM'}
+                    onValueChange={(v) => setEditing(s => s ? { ...s, supplier_id: v } : s)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o fornecedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NENHUM">Sem fornecedor</SelectItem>
+                      {suppliers?.map(s => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Observações</Label>
+                  <Textarea
+                    value={editing.notes}
+                    onChange={(e) => setEditing(s => s ? { ...s, notes: e.target.value } : s)}
+                    rows={2}
+                  />
+                </div>
+
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
+                  <Button
+                    disabled={updatePurchaseMutation.isPending}
+                    onClick={() => updatePurchaseMutation.mutate(editing)}
+                  >
+                    Salvar
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
-                <Button
-                  disabled={updateSupplierMutation.isPending}
-                  onClick={() => editing && updateSupplierMutation.mutate({ id: editing.id, supplier_id: editing.supplier_id })}
-                >
-                  Salvar
-                </Button>
-              </div>
-            </div>
+            )}
           </DialogContent>
         </Dialog>
       </div>
