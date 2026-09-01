@@ -165,21 +165,37 @@ export default function Compras() {
     },
   });
 
-  const updateSupplierMutation = useMutation({
-    mutationFn: async ({ id, supplier_id }: { id: string; supplier_id: string }) => {
+  const updatePurchaseMutation = useMutation({
+    mutationFn: async (data: NonNullable<typeof editing>) => {
+      const purchaseDate = new Date(data.purchase_date);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      if (purchaseDate > today) throw new Error('Data de compra não pode ser no futuro');
+      if (!(data.quantity > 0)) throw new Error('Quantidade deve ser maior que zero');
+      if (!(data.total_price > 0)) throw new Error('Valor deve ser maior que zero');
+
       const { error } = await supabase
         .from('purchase_history')
-        .update({ supplier_id: supplier_id === 'NENHUM' ? null : supplier_id })
-        .eq('id', id);
+        .update({
+          supplier_id: data.supplier_id === 'NENHUM' ? null : data.supplier_id,
+          brand: !data.brand || data.brand === 'GENERICA' ? null : data.brand,
+          quantity: data.quantity,
+          total_price: data.total_price,
+          purchase_date: data.purchase_date,
+          notes: data.notes || null,
+        })
+        .eq('id', data.id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchases'] });
-      toast({ title: 'Fornecedor atualizado!' });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['products-purchase'] });
+      toast({ title: 'Compra atualizada!' });
       setEditing(null);
     },
     onError: (error: any) => {
-      toast({ title: 'Erro ao atualizar fornecedor', description: error.message, variant: 'destructive' });
+      toast({ title: 'Erro ao atualizar compra', description: error.message, variant: 'destructive' });
     },
   });
 
