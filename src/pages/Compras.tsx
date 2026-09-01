@@ -154,6 +154,24 @@ export default function Compras() {
     },
   });
 
+  const updateSupplierMutation = useMutation({
+    mutationFn: async ({ id, supplier_id }: { id: string; supplier_id: string }) => {
+      const { error } = await supabase
+        .from('purchase_history')
+        .update({ supplier_id: supplier_id === 'NENHUM' ? null : supplier_id })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchases'] });
+      toast({ title: 'Fornecedor atualizado!' });
+      setEditing(null);
+    },
+    onError: (error: any) => {
+      toast({ title: 'Erro ao atualizar fornecedor', description: error.message, variant: 'destructive' });
+    },
+  });
+
   const resetForm = () => {
     setFormData({
       product_id: '',
