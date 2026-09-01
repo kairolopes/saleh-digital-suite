@@ -409,6 +409,7 @@ export default function Compras() {
                       <TableHead>Valor Total</TableHead>
                       <TableHead>Preço Unit.</TableHead>
                       <TableHead>Fornecedor</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
