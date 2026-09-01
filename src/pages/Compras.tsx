@@ -432,6 +432,19 @@ export default function Compras() {
                           {formatCurrency(Number(purchase.unit_price))}/{purchase.products?.unit}
                         </TableCell>
                         <TableCell>{purchase.suppliers?.name || '-'}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditing({
+                              id: purchase.id,
+                              supplier_id: purchase.supplier_id || 'NENHUM',
+                              productName: purchase.products?.name || '',
+                            })}
+                          >
+                            <Pencil className="h-4 w-4 mr-1" /> Fornecedor
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
