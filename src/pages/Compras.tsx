@@ -465,11 +465,18 @@ export default function Compras() {
                             size="sm"
                             onClick={() => setEditing({
                               id: purchase.id,
+                              product_id: purchase.product_id,
                               supplier_id: purchase.supplier_id || 'NENHUM',
+                              brand: purchase.brand || 'GENERICA',
+                              quantity: Number(purchase.quantity),
+                              total_price: Number(purchase.total_price),
+                              purchase_date: purchase.purchase_date,
+                              notes: purchase.notes || '',
                               productName: purchase.products?.name || '',
+                              unit: purchase.products?.unit || '',
                             })}
                           >
-                            <Pencil className="h-4 w-4 mr-1" /> Fornecedor
+                            <Pencil className="h-4 w-4 mr-1" /> Editar
                           </Button>
                         </TableCell>
                       </TableRow>
