@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, ShoppingCart, TrendingUp, DollarSign } from 'lucide-react';
+import { Plus, ShoppingCart, TrendingUp, DollarSign, Pencil } from 'lucide-react';
 import { z } from 'zod';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -44,6 +44,7 @@ export default function Compras() {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [releasePrompt, setReleasePrompt] = useState<{ id: string; name: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; supplier_id: string; productName: string } | null>(null);
   const [formData, setFormData] = useState({
     product_id: '',
     supplier_id: '',
@@ -150,6 +151,24 @@ export default function Compras() {
     },
     onError: (error: any) => {
       toast({ title: 'Erro ao liberar produto', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const updateSupplierMutation = useMutation({
+    mutationFn: async ({ id, supplier_id }: { id: string; supplier_id: string }) => {
+      const { error } = await supabase
+        .from('purchase_history')
+        .update({ supplier_id: supplier_id === 'NENHUM' ? null : supplier_id })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchases'] });
+      toast({ title: 'Fornecedor atualizado!' });
+      setEditing(null);
+    },
+    onError: (error: any) => {
+      toast({ title: 'Erro ao atualizar fornecedor', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -390,6 +409,7 @@ export default function Compras() {
                       <TableHead>Valor Total</TableHead>
                       <TableHead>Preço Unit.</TableHead>
                       <TableHead>Fornecedor</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -412,6 +432,19 @@ export default function Compras() {
                           {formatCurrency(Number(purchase.unit_price))}/{purchase.products?.unit}
                         </TableCell>
                         <TableCell>{purchase.suppliers?.name || '-'}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditing({
+                              id: purchase.id,
+                              supplier_id: purchase.supplier_id || 'NENHUM',
+                              productName: purchase.products?.name || '',
+                            })}
+                          >
+                            <Pencil className="h-4 w-4 mr-1" /> Fornecedor
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -437,6 +470,45 @@ export default function Compras() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Alterar fornecedor</DialogTitle>
+              <DialogDescription>
+                Corrija o fornecedor da compra de <strong>{editing?.productName}</strong>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Fornecedor</Label>
+                <Select
+                  value={editing?.supplier_id || 'NENHUM'}
+                  onValueChange={(v) => setEditing(e => e ? { ...e, supplier_id: v } : e)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o fornecedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NENHUM">Sem fornecedor</SelectItem>
+                    {suppliers?.map(s => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
+                <Button
+                  disabled={updateSupplierMutation.isPending}
+                  onClick={() => editing && updateSupplierMutation.mutate({ id: editing.id, supplier_id: editing.supplier_id })}
+                >
+                  Salvar
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );
