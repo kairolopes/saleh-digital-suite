@@ -44,7 +44,18 @@ export default function Compras() {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [releasePrompt, setReleasePrompt] = useState<{ id: string; name: string } | null>(null);
-  const [editing, setEditing] = useState<{ id: string; supplier_id: string; productName: string } | null>(null);
+  const [editing, setEditing] = useState<{
+    id: string;
+    product_id: string;
+    supplier_id: string;
+    brand: string;
+    quantity: number;
+    total_price: number;
+    purchase_date: string;
+    notes: string;
+    productName: string;
+    unit: string;
+  } | null>(null);
   const [formData, setFormData] = useState({
     product_id: '',
     supplier_id: '',
@@ -154,21 +165,37 @@ export default function Compras() {
     },
   });
 
-  const updateSupplierMutation = useMutation({
-    mutationFn: async ({ id, supplier_id }: { id: string; supplier_id: string }) => {
+  const updatePurchaseMutation = useMutation({
+    mutationFn: async (data: NonNullable<typeof editing>) => {
+      const purchaseDate = new Date(data.purchase_date);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      if (purchaseDate > today) throw new Error('Data de compra não pode ser no futuro');
+      if (!(data.quantity > 0)) throw new Error('Quantidade deve ser maior que zero');
+      if (!(data.total_price > 0)) throw new Error('Valor deve ser maior que zero');
+
       const { error } = await supabase
         .from('purchase_history')
-        .update({ supplier_id: supplier_id === 'NENHUM' ? null : supplier_id })
-        .eq('id', id);
+        .update({
+          supplier_id: data.supplier_id === 'NENHUM' ? null : data.supplier_id,
+          brand: !data.brand || data.brand === 'GENERICA' ? null : data.brand,
+          quantity: data.quantity,
+          total_price: data.total_price,
+          purchase_date: data.purchase_date,
+          notes: data.notes || null,
+        })
+        .eq('id', data.id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchases'] });
-      toast({ title: 'Fornecedor atualizado!' });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['products-purchase'] });
+      toast({ title: 'Compra atualizada!' });
       setEditing(null);
     },
     onError: (error: any) => {
-      toast({ title: 'Erro ao atualizar fornecedor', description: error.message, variant: 'destructive' });
+      toast({ title: 'Erro ao atualizar compra', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -438,11 +465,18 @@ export default function Compras() {
                             size="sm"
                             onClick={() => setEditing({
                               id: purchase.id,
+                              product_id: purchase.product_id,
                               supplier_id: purchase.supplier_id || 'NENHUM',
+                              brand: purchase.brand || 'GENERICA',
+                              quantity: Number(purchase.quantity),
+                              total_price: Number(purchase.total_price),
+                              purchase_date: purchase.purchase_date,
+                              notes: purchase.notes || '',
                               productName: purchase.products?.name || '',
+                              unit: purchase.products?.unit || '',
                             })}
                           >
-                            <Pencil className="h-4 w-4 mr-1" /> Fornecedor
+                            <Pencil className="h-4 w-4 mr-1" /> Editar
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -472,41 +506,110 @@ export default function Compras() {
         </AlertDialog>
 
         <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null); }}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Alterar fornecedor</DialogTitle>
+              <DialogTitle>Editar compra</DialogTitle>
               <DialogDescription>
-                Corrija o fornecedor da compra de <strong>{editing?.productName}</strong>
+                Corrija os dados da compra de <strong>{editing?.productName}</strong>
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Fornecedor</Label>
-                <Select
-                  value={editing?.supplier_id || 'NENHUM'}
-                  onValueChange={(v) => setEditing(e => e ? { ...e, supplier_id: v } : e)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione o fornecedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="NENHUM">Sem fornecedor</SelectItem>
-                    {suppliers?.map(s => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {editing && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Data da compra</Label>
+                  <Input
+                    type="date"
+                    value={editing.purchase_date}
+                    onChange={(e) => setEditing(s => s ? { ...s, purchase_date: e.target.value } : s)}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Quantidade ({editing.unit})</Label>
+                    <Input
+                      type="number"
+                      step="0.001"
+                      value={editing.quantity}
+                      onChange={(e) => setEditing(s => s ? { ...s, quantity: parseFloat(e.target.value) || 0 } : s)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Valor total (R$)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={editing.total_price}
+                      onChange={(e) => setEditing(s => s ? { ...s, total_price: parseFloat(e.target.value) || 0 } : s)}
+                    />
+                  </div>
+                </div>
+
+                {editing.quantity > 0 && editing.total_price > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Preço unitário: {formatCurrency(editing.total_price / editing.quantity)}/{editing.unit}
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Marca</Label>
+                  <Select
+                    value={editing.brand || 'GENERICA'}
+                    onValueChange={(v) => setEditing(s => s ? { ...s, brand: v } : s)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione a marca" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="GENERICA">Marca genérica</SelectItem>
+                      {Array.from(new Set([
+                        ...(products?.filter(p => p.id === editing.product_id).map(p => (p as any).brand) || []),
+                        ...(purchases?.filter(p => p.product_id === editing.product_id).map(p => p.brand) || []),
+                      ].filter(Boolean) as string[])).map(b => (
+                        <SelectItem key={b} value={b}>{b}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Fornecedor</Label>
+                  <Select
+                    value={editing.supplier_id || 'NENHUM'}
+                    onValueChange={(v) => setEditing(s => s ? { ...s, supplier_id: v } : s)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o fornecedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NENHUM">Sem fornecedor</SelectItem>
+                      {suppliers?.map(s => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Observações</Label>
+                  <Textarea
+                    value={editing.notes}
+                    onChange={(e) => setEditing(s => s ? { ...s, notes: e.target.value } : s)}
+                    rows={2}
+                  />
+                </div>
+
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
+                  <Button
+                    disabled={updatePurchaseMutation.isPending}
+                    onClick={() => updatePurchaseMutation.mutate(editing)}
+                  >
+                    Salvar
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
-                <Button
-                  disabled={updateSupplierMutation.isPending}
-                  onClick={() => editing && updateSupplierMutation.mutate({ id: editing.id, supplier_id: editing.supplier_id })}
-                >
-                  Salvar
-                </Button>
-              </div>
-            </div>
+            )}
           </DialogContent>
         </Dialog>
       </div>
