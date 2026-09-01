@@ -470,6 +470,45 @@ export default function Compras() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Alterar fornecedor</DialogTitle>
+              <DialogDescription>
+                Corrija o fornecedor da compra de <strong>{editing?.productName}</strong>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Fornecedor</Label>
+                <Select
+                  value={editing?.supplier_id || 'NENHUM'}
+                  onValueChange={(v) => setEditing(e => e ? { ...e, supplier_id: v } : e)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o fornecedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NENHUM">Sem fornecedor</SelectItem>
+                    {suppliers?.map(s => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
+                <Button
+                  disabled={updateSupplierMutation.isPending}
+                  onClick={() => editing && updateSupplierMutation.mutate({ id: editing.id, supplier_id: editing.supplier_id })}
+                >
+                  Salvar
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );
